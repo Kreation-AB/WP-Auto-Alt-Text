@@ -127,6 +127,11 @@ class Auto_Alt_Text_OpenAI  {
         $this->max_api_attempts = max(1, (int) $attempts);
     }
 
+    /** Sleeps until the limiter has capacity. A seam, so tests need not really sleep. */
+    protected function wait_for_rate_limit($estimated_tokens) {
+        $this->rate_limiter->wait_for_capacity($estimated_tokens);
+    }
+
     /**
      * Longest rate-limit cooldown, in seconds, this client sleeps through before
      * a request. A longer one makes the call fail at once with a 'rate_limit'
@@ -648,7 +653,7 @@ class Auto_Alt_Text_OpenAI  {
                 $this->last_error_class = 'rate_limit';
                 throw new Exception( esc_html__( 'OpenAI rate limit reached. Please wait and try again.', 'WP-Auto-Alt-Text' ) );
             }
-            $this->rate_limiter->wait_for_capacity($estimated_tokens);
+            $this->wait_for_rate_limit($estimated_tokens);
             $this->rate_limiter->record_request($estimated_tokens);
 
             $response = wp_remote_post(self::API_URL, $args);

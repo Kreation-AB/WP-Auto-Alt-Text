@@ -4,6 +4,16 @@
  * rate-limited image instead of failing the whole list, and a caller that opts
  * in (WP-CLI) waits through the cooldown.
  */
+/** An OpenAI client whose cooldown wait is recorded instead of slept. */
+class Auto_Alt_Text_Rate_Limit_Test_Client extends Auto_Alt_Text_OpenAI {
+    public $slept_for = 0.0;
+
+    protected function wait_for_rate_limit($estimated_tokens) {
+        $this->slept_for = (new Auto_Alt_Text_Rate_Limiter())->get_recommended_delay($estimated_tokens);
+        (new Auto_Alt_Text_Rate_Limiter())->reset();
+    }
+}
+
 trait Auto_Alt_Text_Rate_Limit_Batch_Helpers {
     private $http_requests = 0;
 
@@ -85,19 +95,24 @@ class Auto_Alt_Text_Rate_Limit_Rest_Batch_Test extends WP_UnitTestCase {
         $this->assert_stopped_on_rate_limit($data['results'], $ids);
     }
 
-    public function test_a_caller_with_a_long_max_wait_waits_through_the_cooldown() {
+    public function test_default_client_fails_fast_but_a_long_max_wait_client_waits_through_a_cooldown() {
         $ids = $this->make_images(1);
-        $this->start_cooldown(3);
-        $openai = new Auto_Alt_Text_OpenAI();
-        $openai->save_api_key('sk-test-not-real');
-        $openai->set_max_wait_seconds(300);
+        $url = wp_get_attachment_url($ids[0]);
+        $this->start_cooldown(6); // above the 5 s default, below 300 s
 
-        $start = microtime(true);
-        $alt = $openai->generate_alt_text(wp_get_attachment_url($ids[0]), $ids[0], 'cli');
+        $default = new Auto_Alt_Text_OpenAI();
+        $default->save_api_key('sk-test-not-real');
+        $this->assertNull($default->generate_alt_text($url, $ids[0], 'cli'));
+        $this->assertSame('rate_limit', $default->get_last_error_class());
+        $this->assertSame(0, $this->http_requests);
 
-        $this->assertSame('A canola field.', $alt);
-        $this->assertGreaterThan(2, microtime(true) - $start, 'It waited for the cooldown');
+        // The wait is stubbed through the limiter's sleep seam: it clears the cooldown instead of sleeping 6 s.
+        $patient = new Auto_Alt_Text_Rate_Limit_Test_Client();
+        $patient->save_api_key('sk-test-not-real');
+        $patient->set_max_wait_seconds(300);
+        $this->assertSame('A canola field.', $patient->generate_alt_text($url, $ids[0], 'cli'));
         $this->assertSame(1, $this->http_requests);
+        $this->assertGreaterThan(5, $patient->slept_for, 'It waited for the whole cooldown');
     }
 }
 

@@ -96,11 +96,11 @@ class Auto_Alt_Text_Activator {
      * @return bool Whether the schema was (re)applied by this call.
      */
     public static function maybe_upgrade($require_current = false) {
-        if (self::$schema_verified) {
+        if (!empty(self::$schema_verified[get_current_blog_id()])) {
             return false;
         }
         if (get_option(self::DB_VERSION_OPTION) === self::SCHEMA_VERSION) {
-            self::$schema_verified = true;
+            self::$schema_verified[get_current_blog_id()] = true;
             return false;
         }
 
@@ -109,34 +109,38 @@ class Auto_Alt_Text_Activator {
                 return false; // Another request is upgrading right now.
             }
             if (self::wait_for_upgrade()) {
-                self::$schema_verified = true;
+                self::$schema_verified[get_current_blog_id()] = true;
                 return false;
             }
             self::activate();
-            self::$schema_verified = true;
+            self::$schema_verified[get_current_blog_id()] = self::stored_schema_version() === self::SCHEMA_VERSION;
             return true;
         }
 
         try {
             // Another request may have finished the upgrade while we waited.
             if (self::stored_schema_version() === self::SCHEMA_VERSION) {
-                self::$schema_verified = true;
+                self::$schema_verified[get_current_blog_id()] = true;
                 return false;
             }
             self::activate();
-            self::$schema_verified = true;
+            self::$schema_verified[get_current_blog_id()] = self::stored_schema_version() === self::SCHEMA_VERSION;
         } finally {
             self::release_upgrade_lock();
         }
         return true;
     }
 
-    /** Set once this request has confirmed the schema is current, so later lazy guards cost nothing. */
-    private static $schema_verified = false;
+    /** Set once this request has confirmed a site's schema is current (keyed by blog ID), so later lazy guards cost nothing. */
+    private static $schema_verified = [];
 
-    /** Forgets the per-request "schema is current" result (used by tests). */
+    /**
+     * Forgets the per-request "schema is current" result.
+     *
+     * @internal Test seam.
+     */
     public static function reset_schema_verified() {
-        self::$schema_verified = false;
+        self::$schema_verified = [];
     }
 
     /**

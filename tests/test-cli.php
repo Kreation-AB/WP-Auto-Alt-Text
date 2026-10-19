@@ -29,6 +29,10 @@ namespace {
             public static function error($message) {
                 throw new \InvalidArgumentException($message);
             }
+
+            public static function halt($code) {
+                throw new \RuntimeException('halt:' . $code);
+            }
         }
     }
 
@@ -61,7 +65,25 @@ namespace {
             parent::set_run_overrides($overrides);
         }
 
+        /** @var int|null Attachment whose generation hits an OpenAI rate limit. */
+        public $rate_limit_on = null;
+        private $last_class = null;
+
+        public function get_last_error_class() {
+            return $this->last_class;
+        }
+
+        public function get_last_error() {
+            return $this->last_class ? 'OpenAI rate limit reached. Please wait and try again.' : '';
+        }
+
         public function generate_alt_text($image_source, $attachment_id, $generation_type = 'manual', $preview_mode = false, $language_override = null) {
+            $this->last_class = null;
+            if ($this->rate_limit_on === $attachment_id) {
+                $this->calls[] = ['attachment_id' => $attachment_id, 'rate_limited' => true];
+                $this->last_class = 'rate_limit';
+                return null;
+            }
             if ($this->on_generate) {
                 call_user_func($this->on_generate, $attachment_id);
             }
@@ -94,6 +116,23 @@ namespace {
 
         public function get_active_plugin_name() {
             return $this->active_plugin_name;
+        }
+
+        /** @var bool Whether bulk_generate_translations() reports a rate-limit stop. */
+        public $stopped_on_rate_limit = false;
+        public $translate_results = [];
+        public $translate_unprocessed = 0;
+
+        public function bulk_generate_translations($attachment_ids) {
+            return $this->translate_results;
+        }
+
+        public function was_rate_limited() {
+            return $this->stopped_on_rate_limit;
+        }
+
+        public function get_unprocessed_count() {
+            return $this->translate_unprocessed;
         }
 
         public function get_post_language($post_id) {
@@ -172,6 +211,51 @@ namespace {
 
             // A long maximum while the run lasts, then back to the default.
             Assert::assertSame([300, null], $this->openai->max_wait_seen);
+        }
+
+        public function test_generate_stops_at_a_rate_limit_and_keeps_the_stopped_image_next_in_line() {
+            $attachment_ids = $this->create_attachments(4);
+            // Newest first: [3, 2, 1, 0]. The second image hits the rate limit.
+            $this->openai->rate_limit_on = $attachment_ids[2];
+            $cli = $this->create_cli();
+
+            try {
+                $cli->generate([], ['resume' => true]);
+                Assert::fail('The run must exit non-zero.');
+            } catch (RuntimeException $e) {
+                Assert::assertSame('halt:1', $e->getMessage());
+            }
+
+            Assert::assertSame([$attachment_ids[3], $attachment_ids[2]], array_column($this->openai->calls, 'attachment_id'), 'No request beyond the stopped image');
+            Assert::assertCount(1, WP_CLI::$warnings);
+            Assert::assertStringContainsString('rate limit', WP_CLI::$warnings[0]);
+            Assert::assertStringContainsString('3 image(s) were not processed', WP_CLI::$warnings[0]);
+            Assert::assertSame([], WP_CLI::$successes === [] ? [] : array_filter(WP_CLI::$successes, static function ($m) {
+                return false !== strpos($m, 'completed');
+            }));
+
+            $resume_context = $this->invoke_private_method($cli, 'build_resume_context', [[], 'missing', 'visible', Auto_Alt_Text_Models::current_id(), null]);
+            $option = $this->invoke_private_method($cli, 'get_resume_state_option_name', [$resume_context]);
+            Assert::assertSame($attachment_ids[3], get_option($option)['last_processed_id'], 'The stopped image is not skipped by --resume');
+        }
+
+        public function test_translate_stops_with_a_warning_when_rate_limited() {
+            $manager = new Auto_Alt_Text_CLI_Test_Language_Manager();
+            $manager->stopped_on_rate_limit = true;
+            $manager->translate_results = [11 => []];
+            $manager->translate_unprocessed = 2;
+
+            try {
+                $this->create_cli($manager)->translate([], ['ids' => '11,12,13']);
+                Assert::fail('The run must exit non-zero.');
+            } catch (RuntimeException $e) {
+                Assert::assertSame('halt:1', $e->getMessage());
+            }
+
+            Assert::assertCount(1, WP_CLI::$warnings);
+            Assert::assertStringContainsString('rate limit', WP_CLI::$warnings[0]);
+            Assert::assertStringContainsString('2 source image(s) were not processed', WP_CLI::$warnings[0]);
+            Assert::assertSame([], WP_CLI::$successes, 'No plain success line');
         }
 
         public function test_generate_processes_newest_attachments_first() {

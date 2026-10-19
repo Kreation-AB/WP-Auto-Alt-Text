@@ -4,6 +4,7 @@ class Auto_Alt_Text_Language_Manager {
     private $max_wait_seconds = null;
     /** @var bool Whether the last bulk run stopped on a rate limit. */
     private $rate_limited = false;
+    private $unprocessed_count = 0;
 
     public function set_max_wait_seconds($seconds = null) {
         $this->max_wait_seconds = null === $seconds ? null : (float) $seconds;
@@ -11,6 +12,11 @@ class Auto_Alt_Text_Language_Manager {
 
     public function was_rate_limited() {
         return $this->rate_limited;
+    }
+
+    /** @return int Source images a rate-limit stop left unprocessed in the last bulk run. */
+    public function get_unprocessed_count() {
+        return $this->unprocessed_count;
     }
 
     private $active_plugin;
@@ -510,9 +516,11 @@ class Auto_Alt_Text_Language_Manager {
     public function bulk_generate_translations($attachment_ids) {
         $results = [];
         $this->rate_limited = false;
+        $this->unprocessed_count = 0;
 
-        foreach ($attachment_ids as $attachment_id) {
+        foreach (array_values($attachment_ids) as $index => $attachment_id) {
             if ($this->rate_limited) {
+                $this->unprocessed_count = count($attachment_ids) - $index;
                 break; // Stop at the first rate limit; nothing is written for the rest.
             }
             $base_alt_text = $this->get_alt_text($attachment_id, $this->get_post_language($attachment_id));

@@ -203,7 +203,23 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
                 if ($alt_text) {
                     WP_CLI::success(sprintf('Generated alt text for image %d: %s', $attachment_id, $alt_text));
                 } else {
-                    $this->warn_generation_failure($attachment_id);
+                    if (!(method_exists($this->openai, 'get_last_error_class') && 'rate_limit' === $this->openai->get_last_error_class())) {
+                        $this->warn_generation_failure($attachment_id);
+                    } else {
+                        // The rest of the list would fail the same way. The stopped
+                        // image is not persisted, so --resume tries it next.
+                        $progress->finish();
+                        $not_processed = count($attachment_ids) - (int) array_search($attachment_id, $attachment_ids, true);
+                        WP_CLI::warning(sprintf(
+                            'OpenAI rate limit reached and it did not clear in time. %d image(s) were not processed. Re-run the command later%s.',
+                            $not_processed,
+                            $resume ? ' with --resume' : ''
+                        ));
+                        $this->openai->set_max_wait_seconds();
+                        $this->openai->set_run_overrides([]);
+                        WP_CLI::halt(1);
+                        return;
+                    }
                 }
 
                 if ($resume) {
@@ -286,7 +302,7 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
      * : Process all images in the media library
      */
     public function translate($args, $assoc_args) {
-        $language_manager = new Auto_Alt_Text_Language_Manager();
+        $language_manager = $this->language_manager;
 
         if (isset($assoc_args['all'])) {
             $attachment_ids = $this->get_all_attachment_ids();
@@ -305,6 +321,14 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
             $results = $language_manager->bulk_generate_translations($attachment_ids);
         } finally {
             $language_manager->set_max_wait_seconds();
+        }
+        if ($language_manager->was_rate_limited()) {
+            WP_CLI::warning(sprintf(
+                'OpenAI rate limit reached and it did not clear in time. %d source image(s) were not processed. Re-run the command later.',
+                $language_manager->get_unprocessed_count()
+            ));
+            WP_CLI::halt(1);
+            return;
         }
         $summary = $this->summarize_translation_results($results);
 

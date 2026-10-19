@@ -106,6 +106,7 @@ if ($aat_key && !defined('AUTO_ALT_TEXT_OPENAI_API_KEY')) {
     define('AUTO_ALT_TEXT_OPENAI_API_KEY', $aat_key);
 }
 $aat_openai = new Auto_Alt_Text_OpenAI();
+$aat_openai->set_max_wait_seconds(300); // Pace through rate-limit cooldowns instead of recording error rows.
 
 $aat_progress = \WP_CLI\Utils\make_progress_bar('Evaluating', $aat_calls);
 

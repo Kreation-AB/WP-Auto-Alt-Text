@@ -226,4 +226,20 @@ class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
 
         $this->assertSame(0, $queries, 'Once verified, later guards in the request cost nothing');
     }
+
+    public function test_a_failed_activate_does_not_mark_the_schema_verified() {
+        $this->outdate();
+        $runs = 0;
+        $fail = function ($queries) use (&$runs) {
+            $runs++;
+            throw new Exception('db down'); // swallowed by activate(); the version is not recorded
+        };
+        add_filter('dbdelta_create_queries', $fail);
+        Auto_Alt_Text_Activator::maybe_upgrade(true);
+        Auto_Alt_Text_Activator::maybe_upgrade(true);
+        remove_filter('dbdelta_create_queries', $fail);
+
+        $this->assertSame(2, $runs, 'The lazy guard retries after a failed upgrade');
+        $this->assertTrue($this->version_is_outdated());
+    }
 }
