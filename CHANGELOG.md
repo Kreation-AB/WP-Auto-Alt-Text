@@ -92,6 +92,8 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 
 - En saknad eller avvisad API-nyckel pausar nu kön i bakgrunden i stället för att markera alla köade bilder som misslyckade.
 - En bild som kraschar under bearbetningen blockerar inte längre kön för alltid.
+- Ett 429-svar (”för många anrop”) från OpenAI använder inte längre upp ett försök i kön. Bilden väntar tills gränsen har återställts och prövas sedan igen.
+- Databasuppdateringen efter en ny version körs inte längre på besökssidor eller i kassan, och två anrop kan inte köra den samtidigt.
 
 #### WooCommerce
 
@@ -166,6 +168,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - Dold metadata `_aat_alt_provenance` på bilder.
 - Databasschema 1.3: statistiktabellen får kolumnerna `model`, `input_tokens` och `output_tokens`.
 - Kön har en ny kolumn, `context_post_id`, och processorer får produkten eller inlägget som tredje argument. `Auto_Alt_Text_Queue::enqueue()` och `promote_pending()` tar emot det som ett valfritt tredje argument.
+- `aat_brand_position` och `aat_product_keywords` registreras inte längre som inställningar (de användes aldrig).
 
 #### Cron, AJAX och REST
 
