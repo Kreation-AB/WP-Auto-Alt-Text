@@ -519,16 +519,18 @@ class Auto_Alt_Text_Language_Manager {
         $this->unprocessed_count = 0;
 
         foreach (array_values($attachment_ids) as $index => $attachment_id) {
-            if ($this->rate_limited) {
-                $this->unprocessed_count = count($attachment_ids) - $index;
-                break; // Stop at the first rate limit; nothing is written for the rest.
-            }
             $base_alt_text = $this->get_alt_text($attachment_id, $this->get_post_language($attachment_id));
             if (!empty($base_alt_text)) {
                 $results[$attachment_id] = $this->generate_multilingual_alt_text(
                     $attachment_id,
                     $base_alt_text
                 );
+            }
+            if ($this->rate_limited) {
+                // Stop at the first rate limit; nothing is written for the rest. The
+                // image it hit counts as not processed, even if some languages were written.
+                $this->unprocessed_count = count($attachment_ids) - $index;
+                break;
             }
         }
 

@@ -203,7 +203,7 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
                 if ($alt_text) {
                     WP_CLI::success(sprintf('Generated alt text for image %d: %s', $attachment_id, $alt_text));
                 } else {
-                    if (!(method_exists($this->openai, 'get_last_error_class') && 'rate_limit' === $this->openai->get_last_error_class())) {
+                    if ('rate_limit' !== $this->openai->get_last_error_class()) {
                         $this->warn_generation_failure($attachment_id);
                     } else {
                         // The rest of the list would fail the same way. The stopped
@@ -324,7 +324,7 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
         }
         if ($language_manager->was_rate_limited()) {
             WP_CLI::warning(sprintf(
-                'OpenAI rate limit reached and it did not clear in time. %d source image(s) were not processed. Re-run the command later.',
+                'OpenAI rate limit reached and it did not clear in time. %d source image(s) were not (fully) processed. Re-run the command later.',
                 $language_manager->get_unprocessed_count()
             ));
             WP_CLI::halt(1);

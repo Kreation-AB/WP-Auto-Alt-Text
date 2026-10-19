@@ -2,6 +2,11 @@
 
 namespace {
 
+    // The real language manager in the translate tests detects WPML through this.
+    if (!defined('ICL_SITEPRESS_VERSION')) {
+        define('ICL_SITEPRESS_VERSION', 'test');
+    }
+
     if (!class_exists('WP_CLI')) {
         class WP_CLI {
             public static $logs = [];
@@ -101,6 +106,16 @@ namespace {
         }
     }
 
+    /** The real client; only the cooldown sleep seam records the delay instead of sleeping. */
+    class Auto_Alt_Text_CLI_Test_Real_OpenAI extends Auto_Alt_Text_OpenAI {
+        /** @var float[] Every delay this client would have slept through before a request. */
+        public $waits = [];
+
+        protected function wait_for_rate_limit($estimated_tokens) {
+            $this->waits[] = (new Auto_Alt_Text_Rate_Limiter())->get_recommended_delay($estimated_tokens);
+        }
+    }
+
     class Auto_Alt_Text_CLI_Test_Statistics extends Auto_Alt_Text_Statistics {
         public function __construct() {}
     }
@@ -163,11 +178,18 @@ namespace {
     class Auto_Alt_Text_CLI_Test extends WP_UnitTestCase {
         private $openai;
         private $statistics;
+        /** @var int OpenAI requests seen by mock_openai(). */
+        private $openai_requests = 0;
+        /** WPML fixture: post ID => language, post ID => trid, trid => [language => post ID]. */
+        private $wpml_languages = [];
+        private $wpml_trids = [];
+        private $wpml_groups = [];
 
         public function setUp(): void {
             parent::setUp();
             $this->openai = new Auto_Alt_Text_CLI_Test_OpenAI();
             $this->statistics = new Auto_Alt_Text_CLI_Test_Statistics();
+            (new Auto_Alt_Text_Rate_Limiter())->reset();
 
             $this->delete_resume_state_options();
             WP_CLI::$logs = [];
@@ -178,6 +200,7 @@ namespace {
 
         public function tearDown(): void {
             $this->delete_resume_state_options();
+            (new Auto_Alt_Text_Rate_Limiter())->reset();
             parent::tearDown();
         }
 
@@ -219,12 +242,9 @@ namespace {
             $this->openai->rate_limit_on = $attachment_ids[2];
             $cli = $this->create_cli();
 
-            try {
+            $this->assert_halts(1, function () use ($cli) {
                 $cli->generate([], ['resume' => true]);
-                Assert::fail('The run must exit non-zero.');
-            } catch (RuntimeException $e) {
-                Assert::assertSame('halt:1', $e->getMessage());
-            }
+            });
 
             Assert::assertSame([$attachment_ids[3], $attachment_ids[2]], array_column($this->openai->calls, 'attachment_id'), 'No request beyond the stopped image');
             Assert::assertCount(1, WP_CLI::$warnings);
@@ -245,17 +265,105 @@ namespace {
             $manager->translate_results = [11 => []];
             $manager->translate_unprocessed = 2;
 
-            try {
+            $this->assert_halts(1, function () use ($manager) {
                 $this->create_cli($manager)->translate([], ['ids' => '11,12,13']);
-                Assert::fail('The run must exit non-zero.');
-            } catch (RuntimeException $e) {
-                Assert::assertSame('halt:1', $e->getMessage());
-            }
+            });
 
             Assert::assertCount(1, WP_CLI::$warnings);
             Assert::assertStringContainsString('rate limit', WP_CLI::$warnings[0]);
-            Assert::assertStringContainsString('2 source image(s) were not processed', WP_CLI::$warnings[0]);
+            Assert::assertStringContainsString('2 source image(s) were not (fully) processed', WP_CLI::$warnings[0]);
             Assert::assertSame([], WP_CLI::$successes, 'No plain success line');
+        }
+
+        public function test_generate_with_the_real_client_stops_on_a_cooldown_longer_than_its_wait() {
+            $ids = $this->create_uploaded_images(3);
+            $this->mock_openai();
+            $this->start_cooldown(400); // longer than the CLI's 300 s maximum wait
+            $client = new Auto_Alt_Text_CLI_Test_Real_OpenAI();
+            $cli = new Auto_Alt_Text_CLI($client, $this->statistics, new Auto_Alt_Text_CLI_Test_Language_Manager());
+
+            $this->assert_halts(1, function () use ($cli) {
+                $cli->generate([], ['resume' => true]);
+            });
+
+            Assert::assertSame(0, $this->openai_requests, 'No request during the cooldown');
+            Assert::assertSame([], $client->waits, 'It never sleeps on a cooldown longer than its maximum wait');
+            Assert::assertSame('rate_limit', $client->get_last_error_class());
+            Assert::assertCount(1, WP_CLI::$warnings);
+            Assert::assertStringContainsString('3 image(s) were not processed', WP_CLI::$warnings[0]);
+            foreach ($ids as $id) {
+                Assert::assertSame('', get_post_meta($id, '_wp_attachment_image_alt', true));
+            }
+            // No saved position: the next --resume starts at the newest image, the one that stopped.
+            $resume_context = $this->invoke_private_method($cli, 'build_resume_context', [[], 'missing', Auto_Alt_Text_Prompt::naming(null), Auto_Alt_Text_Models::current_id(), null]);
+            $option = $this->invoke_private_method($cli, 'get_resume_state_option_name', [$resume_context]);
+            Assert::assertFalse(get_option($option, false));
+            Assert::assertSame(5.0, $this->get_max_wait($client), 'The default maximum wait is restored');
+        }
+
+        public function test_generate_without_a_rate_limit_ends_with_the_old_success_line() {
+            $this->create_uploaded_images(3);
+            $this->mock_openai();
+            $cli = new Auto_Alt_Text_CLI(new Auto_Alt_Text_OpenAI(), $this->statistics, new Auto_Alt_Text_CLI_Test_Language_Manager());
+
+            // The WP_CLI stub's halt() throws, so returning here means it was never called.
+            $cli->generate([], []);
+
+            Assert::assertSame(3, $this->openai_requests);
+            Assert::assertSame([], WP_CLI::$warnings);
+            Assert::assertSame('Alt text generation completed!', end(WP_CLI::$successes));
+        }
+
+        public function test_translate_without_a_rate_limit_ends_with_the_old_success_line() {
+            $sources = $this->create_translatable_images(2);
+            $this->mock_openai();
+
+            // The WP_CLI stub's halt() throws, so returning here means it was never called.
+            $this->create_cli(new Auto_Alt_Text_Language_Manager())->translate([], ['ids' => implode(',', $sources)]);
+
+            Assert::assertSame(4, $this->openai_requests, 'Swedish and French for each image');
+            Assert::assertSame([], WP_CLI::$warnings);
+            Assert::assertCount(1, WP_CLI::$successes);
+            Assert::assertStringStartsWith('Processed 2 source images.', WP_CLI::$successes[0]);
+        }
+
+        public function test_bulk_translations_stop_at_a_rate_limit_and_count_the_stopped_image() {
+            $sources = $this->create_translatable_images(3);
+            // Image 1 gets both languages; the first request for image 2 gets the 429.
+            $this->mock_openai(3);
+            $manager = new Auto_Alt_Text_Language_Manager();
+            $manager->set_max_wait_seconds(300); // as WP-CLI does; the 400 s cooldown is longer
+
+            $manager->bulk_generate_translations($sources);
+
+            Assert::assertSame(3, $this->openai_requests, 'No request after the 429');
+            Assert::assertTrue($manager->was_rate_limited());
+            Assert::assertSame(2, $manager->get_unprocessed_count(), 'Images 2 and 3');
+            Assert::assertSame('A canola field.', get_post_meta($this->wpml_groups[$sources[0]]['fr'], '_wp_attachment_image_alt', true));
+            foreach (['sv', 'fr'] as $language) {
+                Assert::assertSame('', get_post_meta($this->wpml_groups[$sources[1]][$language], '_wp_attachment_image_alt', true));
+                Assert::assertSame('', get_post_meta($this->wpml_groups[$sources[2]][$language], '_wp_attachment_image_alt', true));
+            }
+        }
+
+        public function test_translate_counts_the_last_image_as_not_processed_when_the_rate_limit_hits_it() {
+            $sources = $this->create_translatable_images(3);
+            // Images 1 and 2 and Swedish for image 3 succeed; French for image 3 gets the 429.
+            $this->mock_openai(6);
+            $manager = new Auto_Alt_Text_Language_Manager();
+
+            $this->assert_halts(1, function () use ($manager, $sources) {
+                $this->create_cli($manager)->translate([], ['ids' => implode(',', $sources)]);
+            });
+
+            Assert::assertSame(6, $this->openai_requests);
+            Assert::assertTrue($manager->was_rate_limited());
+            Assert::assertSame(1, $manager->get_unprocessed_count(), 'The last image counts although one of its languages was written');
+            Assert::assertSame('A canola field.', get_post_meta($this->wpml_groups[$sources[2]]['sv'], '_wp_attachment_image_alt', true));
+            Assert::assertSame('', get_post_meta($this->wpml_groups[$sources[2]]['fr'], '_wp_attachment_image_alt', true));
+            Assert::assertCount(1, WP_CLI::$warnings);
+            Assert::assertStringContainsString('1 source image(s) were not (fully) processed', WP_CLI::$warnings[0]);
+            Assert::assertSame([], WP_CLI::$successes);
         }
 
         public function test_generate_processes_newest_attachments_first() {
@@ -623,6 +731,102 @@ namespace {
             } catch (InvalidArgumentException $exception) {
                 Assert::assertSame($message, $exception->getMessage());
             }
+        }
+
+        /** Runs a command that must end with WP_CLI::halt($code); the stub throws 'halt:<code>'. */
+        private function assert_halts($code, callable $command) {
+            try {
+                $command();
+            } catch (RuntimeException $e) {
+                Assert::assertSame('halt:' . $code, $e->getMessage());
+                return;
+            }
+            Assert::fail('The run must exit non-zero.');
+        }
+
+        /** Answers OpenAI with a success, or from request number $rate_limit_from on with a 429 (retry-after 400 s). */
+        private function mock_openai($rate_limit_from = 0) {
+            (new Auto_Alt_Text_OpenAI())->save_api_key('sk-test-not-real');
+            $this->openai_requests = 0;
+            add_filter('pre_http_request', function ($pre, $args, $url) use ($rate_limit_from) {
+                if (strpos($url, 'openai.com') === false) {
+                    return $pre;
+                }
+                $this->openai_requests++;
+                if ($rate_limit_from > 0 && $this->openai_requests >= $rate_limit_from) {
+                    return [
+                        'headers'  => ['retry-after' => '400'],
+                        'body'     => wp_json_encode(['error' => ['message' => 'Rate limit reached', 'type' => 'requests', 'code' => 'rate_limit_exceeded']]),
+                        'response' => ['code' => 429, 'message' => 'Too Many Requests'],
+                        'cookies'  => [],
+                    ];
+                }
+                return [
+                    'headers'  => [],
+                    'body'     => wp_json_encode([
+                        'status' => 'completed',
+                        'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'A canola field.']]]],
+                        'usage'  => ['total_tokens' => 42],
+                    ]),
+                    'response' => ['code' => 200, 'message' => 'OK'],
+                    'cookies'  => [],
+                ];
+            }, 10, 3);
+        }
+
+        private function start_cooldown($seconds) {
+            $limiter = new Auto_Alt_Text_Rate_Limiter();
+            $limiter->reset();
+            $limiter->record_rate_limit_error(['retry-after' => (string) $seconds], 1);
+        }
+
+        private function get_max_wait(Auto_Alt_Text_OpenAI $client) {
+            $property = new ReflectionProperty(Auto_Alt_Text_OpenAI::class, 'max_wait_seconds');
+            $property->setAccessible(true);
+            return $property->getValue($client);
+        }
+
+        private function create_uploaded_images($count) {
+            $ids = [];
+            for ($i = 0; $i < $count; $i++) {
+                $ids[] = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
+            }
+            return $ids;
+        }
+
+        /**
+         * English source images with alt text, each with a Swedish and a French
+         * WPML translation that has none. Returns the source IDs in order.
+         */
+        private function create_translatable_images($count) {
+            $sources = [];
+            for ($i = 0; $i < $count; $i++) {
+                [$source, $swedish, $french] = $this->create_attachments(3);
+                update_post_meta($source, '_wp_attachment_image_alt', 'Source alt text ' . $i);
+                $this->wpml_groups[$source] = ['en' => $source, 'sv' => $swedish, 'fr' => $french];
+                foreach ($this->wpml_groups[$source] as $language => $id) {
+                    $this->wpml_languages[$id] = $language;
+                    $this->wpml_trids[$id] = $source;
+                }
+                $sources[] = $source;
+            }
+
+            add_filter('wpml_default_language', static function () {
+                return 'en';
+            });
+            add_filter('wpml_post_language_details', function ($details, $post_id) {
+                return ['language_code' => $this->wpml_languages[$post_id] ?? 'en'];
+            }, 10, 2);
+            add_filter('wpml_element_trid', function ($trid, $post_id) {
+                return $this->wpml_trids[$post_id] ?? null;
+            }, 10, 2);
+            add_filter('wpml_get_element_translations', function ($details, $trid) {
+                return array_map(static function ($id) {
+                    return (object) ['element_id' => $id];
+                }, $this->wpml_groups[$trid] ?? []);
+            }, 10, 2);
+
+            return $sources;
         }
 
         private function create_cli($language_manager = null) {
