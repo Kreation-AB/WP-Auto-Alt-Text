@@ -455,16 +455,6 @@ function auto_alt_text_register_settings() {
     );
     register_setting(
         AUTO_ALT_TEXT_SETTINGS_GROUP,
-        'aat_brand_position',
-        'auto_alt_text_sanitize'
-    );
-    register_setting(
-        AUTO_ALT_TEXT_SETTINGS_GROUP,
-        'aat_product_keywords',
-        'auto_alt_text_sanitize'
-    );
-    register_setting(
-        AUTO_ALT_TEXT_SETTINGS_GROUP,
         'aat_brand_description',
         'auto_alt_text_sanitize'
     );

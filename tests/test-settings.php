@@ -106,4 +106,25 @@ class Auto_Alt_Text_Settings_Test extends WP_UnitTestCase {
 
         $this->assertStringContainsString('name="auto_alt_text_overwrite_policy"', $html);
     }
+
+    public function test_unused_brand_options_are_not_registered_and_survive_a_save() {
+        $dead = ['aat_brand_position', 'aat_product_keywords'];
+        $registered = get_registered_settings();
+        foreach ($dead as $name) {
+            $this->assertArrayNotHasKey($name, $registered);
+            update_option($name, 'kept-' . $name);
+        }
+
+        // What wp-admin/options.php does: every registered option of the group
+        // is updated, with null when the form has no field for it.
+        foreach ($registered as $name => $args) {
+            if (AUTO_ALT_TEXT_SETTINGS_GROUP === $args['group'] && 'auto_alt_text_api_key' !== $name) {
+                update_option($name, null);
+            }
+        }
+
+        foreach ($dead as $name) {
+            $this->assertSame('kept-' . $name, get_option($name));
+        }
+    }
 }
