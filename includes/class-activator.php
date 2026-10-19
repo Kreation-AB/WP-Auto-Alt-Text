@@ -96,7 +96,11 @@ class Auto_Alt_Text_Activator {
      * @return bool Whether the schema was (re)applied by this call.
      */
     public static function maybe_upgrade($require_current = false) {
+        if (self::$schema_verified) {
+            return false;
+        }
         if (get_option(self::DB_VERSION_OPTION) === self::SCHEMA_VERSION) {
+            self::$schema_verified = true;
             return false;
         }
 
@@ -105,32 +109,47 @@ class Auto_Alt_Text_Activator {
                 return false; // Another request is upgrading right now.
             }
             if (self::wait_for_upgrade()) {
+                self::$schema_verified = true;
                 return false;
             }
             self::activate();
+            self::$schema_verified = true;
             return true;
         }
 
         try {
             // Another request may have finished the upgrade while we waited.
             if (self::stored_schema_version() === self::SCHEMA_VERSION) {
+                self::$schema_verified = true;
                 return false;
             }
             self::activate();
+            self::$schema_verified = true;
         } finally {
             self::release_upgrade_lock();
         }
         return true;
     }
 
-    /** Reads the schema version straight from the DB, and refreshes this request's cached copy. */
+    /** Set once this request has confirmed the schema is current, so later lazy guards cost nothing. */
+    private static $schema_verified = false;
+
+    /** Forgets the per-request "schema is current" result (used by tests). */
+    public static function reset_schema_verified() {
+        self::$schema_verified = false;
+    }
+
+    /**
+     * Reads the schema version straight from the DB. get_option() can be stale
+     * here (the option is autoloaded, so this request holds the value it started
+     * with), which is why a confirmed result is remembered in $schema_verified.
+     */
     private static function stored_schema_version() {
         $wpdb = self::get_db();
         $version = $wpdb->get_var($wpdb->prepare(
             "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
             self::DB_VERSION_OPTION
         ));
-        wp_cache_delete(self::DB_VERSION_OPTION, 'options');
         return $version;
     }
 

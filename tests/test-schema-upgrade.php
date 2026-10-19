@@ -1,7 +1,7 @@
 <?php
 /**
- * The schema upgrade runs only in admin, cron, CLI and REST requests, is
- * guarded lazily in the writers, and is serialised with a lock.
+ * The schema upgrade runs only in admin, cron and CLI requests, is guarded
+ * lazily in the writers, and is serialised with a lock.
  */
 class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
     private const LOCK = 'aat_schema_upgrade_lock';
@@ -10,6 +10,7 @@ class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
         parent::setUp();
         Auto_Alt_Text_Activator::activate();
         $this->drop_lock();
+        Auto_Alt_Text_Activator::reset_schema_verified();
         // Never really wait in tests; the lazy guard falls through to activate().
         add_filter('aat_schema_upgrade_wait_seconds', '__return_zero');
     }
@@ -44,6 +45,7 @@ class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
     }
 
     private function outdate() {
+        Auto_Alt_Text_Activator::reset_schema_verified();
         update_option(Auto_Alt_Text_Activator::DB_VERSION_OPTION, '0.1');
     }
 
@@ -203,5 +205,25 @@ class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
         $this->assertSame((string) $post_id, $wpdb->get_var($wpdb->prepare(
             "SELECT context_post_id FROM {$table} WHERE attachment_id = %d", $id
         )));
+    }
+
+    public function test_lazy_guard_checks_the_schema_once_per_request() {
+        $current = get_option(Auto_Alt_Text_Activator::DB_VERSION_OPTION);
+        $this->outdate(); // this request's cache holds the old version
+        global $wpdb;
+        $wpdb->update($wpdb->options, ['option_value' => $current], ['option_name' => Auto_Alt_Text_Activator::DB_VERSION_OPTION]);
+
+        Auto_Alt_Text_Activator::maybe_upgrade(true);
+
+        $queries = 0;
+        $counter = function ($query) use (&$queries) {
+            $queries++;
+            return $query;
+        };
+        add_filter('query', $counter);
+        Auto_Alt_Text_Activator::maybe_upgrade(true);
+        remove_filter('query', $counter);
+
+        $this->assertSame(0, $queries, 'Once verified, later guards in the request cost nothing');
     }
 }

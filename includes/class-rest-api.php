@@ -107,8 +107,20 @@ class Auto_Alt_Text_REST_API {
     public function process_batch($request) {
         $attachment_ids = $request->get_param('attachment_ids');
         $results = [];
+        $rate_limit_message = null;
 
         foreach ($attachment_ids as $id) {
+            // After a rate limit the rest of the list would fail the same way:
+            // report it as not processed and write nothing for it.
+            if (null !== $rate_limit_message) {
+                $results[$id] = [
+                    'success'       => false,
+                    'not_processed' => true,
+                    'message'       => $rate_limit_message,
+                ];
+                continue;
+            }
+
             if (!wp_attachment_is_image($id)) {
                 $results[$id] = [
                     'success' => false,
@@ -149,11 +161,20 @@ class Auto_Alt_Text_REST_API {
                 'success' => false,
                 'message' => $this->openai()->get_last_error(),
             ];
+            if ('rate_limit' === $this->openai()->get_last_error_class()) {
+                $results[$id]['rate_limited'] = true;
+                $rate_limit_message = $results[$id]['message'];
+            }
         }
 
-        return new WP_REST_Response([
+        $response = [
             'success' => true,
             'results' => $results
-        ], 200);
+        ];
+        if (null !== $rate_limit_message) {
+            $response['rate_limited'] = true;
+            $response['message']      = $rate_limit_message;
+        }
+        return new WP_REST_Response($response, 200);
     }
 }

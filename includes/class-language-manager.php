@@ -1,5 +1,18 @@
 <?php
 class Auto_Alt_Text_Language_Manager {
+    /** @var float|null Longest rate-limit cooldown the translation client waits through (null: client default). */
+    private $max_wait_seconds = null;
+    /** @var bool Whether the last bulk run stopped on a rate limit. */
+    private $rate_limited = false;
+
+    public function set_max_wait_seconds($seconds = null) {
+        $this->max_wait_seconds = null === $seconds ? null : (float) $seconds;
+    }
+
+    public function was_rate_limited() {
+        return $this->rate_limited;
+    }
+
     private $active_plugin;
     private $default_language;
 
@@ -408,6 +421,9 @@ class Auto_Alt_Text_Language_Manager {
         }
 
         $openai = new Auto_Alt_Text_OpenAI($this);
+        if (null !== $this->max_wait_seconds) {
+            $openai->set_max_wait_seconds($this->max_wait_seconds);
+        }
         $translated_alts = [];
 
         foreach ($translations as $language => $translated_attachment_id) {
@@ -425,6 +441,10 @@ class Auto_Alt_Text_Language_Manager {
             $translated_alt = $openai->translate_alt_text($base_alt_text, $source_language, $language);
 
             if (empty($translated_alt)) {
+                if ('rate_limit' === $openai->get_last_error_class()) {
+                    $this->rate_limited = true;
+                    break; // The remaining languages would hit the same limit.
+                }
                 continue;
             }
 
@@ -489,8 +509,12 @@ class Auto_Alt_Text_Language_Manager {
      */
     public function bulk_generate_translations($attachment_ids) {
         $results = [];
+        $this->rate_limited = false;
 
         foreach ($attachment_ids as $attachment_id) {
+            if ($this->rate_limited) {
+                break; // Stop at the first rate limit; nothing is written for the rest.
+            }
             $base_alt_text = $this->get_alt_text($attachment_id, $this->get_post_language($attachment_id));
             if (!empty($base_alt_text)) {
                 $results[$attachment_id] = $this->generate_multilingual_alt_text(

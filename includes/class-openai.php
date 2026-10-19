@@ -16,6 +16,7 @@ class Auto_Alt_Text_OpenAI  {
     private $statistics;
     private $language_manager;
     private $max_api_attempts;
+    private $max_wait_seconds = self::MAX_RETRY_DELAY_SECONDS;
     private $last_error_class = null;
     private $context_post_id = null;
 
@@ -124,6 +125,16 @@ class Auto_Alt_Text_OpenAI  {
      */
     public function set_max_api_attempts($attempts) {
         $this->max_api_attempts = max(1, (int) $attempts);
+    }
+
+    /**
+     * Longest rate-limit cooldown, in seconds, this client sleeps through before
+     * a request. A longer one makes the call fail at once with a 'rate_limit'
+     * error class, so user-facing requests never hang. Long-running callers
+     * (WP-CLI) raise it; null restores the default.
+     */
+    public function set_max_wait_seconds($seconds = null) {
+        $this->max_wait_seconds = null === $seconds ? self::MAX_RETRY_DELAY_SECONDS : max(0.0, (float) $seconds);
     }
 
     /**
@@ -633,7 +644,7 @@ class Auto_Alt_Text_OpenAI  {
         for ($attempt = 1; $attempt <= $max_attempts; $attempt++) {
             // A cooldown recorded by another request (e.g. the queue) can be long.
             // Sleeping through it would hang a user-facing request: fail fast.
-            if ($this->rate_limiter->get_recommended_delay($estimated_tokens) > self::MAX_RETRY_DELAY_SECONDS) {
+            if ($this->rate_limiter->get_recommended_delay($estimated_tokens) > $this->max_wait_seconds) {
                 $this->last_error_class = 'rate_limit';
                 throw new Exception( esc_html__( 'OpenAI rate limit reached. Please wait and try again.', 'WP-Auto-Alt-Text' ) );
             }

@@ -119,6 +119,11 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(response => response.json())
             .then(data => {
+                if (data && data.rate_limited) {
+                    ids.length = 0;
+                    stopBatchOnRateLimit(data, processed, totalImages);
+                    return;
+                }
                 processed += batch.length;
                 skipped += countSkippedResults(data);
                 const progress = (processed / totalImages) * 100;
@@ -781,6 +786,11 @@ function processBatchSelection(e, button) {
         })
         .then(response => response.json())
         .then(data => {
+            if (data && data.rate_limited) {
+                ids.length = 0;
+                stopBatchOnRateLimit(data, processed, totalImages);
+                return;
+            }
             processed += batch.length;
             skipped += countSkippedResults(data);
             const progress = Math.min((processed / totalImages) * 100, 99);
@@ -898,6 +908,25 @@ function countSkippedResults(data) {
     }
 
     return Object.values(data.data).filter((result) => result && result.skipped).length;
+}
+
+/**
+ * Stops a bulk run whose batch response says OpenAI rate-limited it: no more
+ * batches are sent and the run is not shown as complete.
+ *
+ * @param {Object} data Batch response with `rate_limited`, `message` and per-image `data`.
+ * @param {number} processedBefore Images processed before this batch.
+ * @param {number} total Images selected.
+ */
+function stopBatchOnRateLimit(data, processedBefore, total) {
+    const results = data.data && typeof data.data === 'object' ? Object.values(data.data) : [];
+    const done = results.filter((result) => result && !result.not_processed && !result.rate_limited).length;
+    const message = data.message || 'OpenAI rate limit reached. Please wait and try again.';
+    markProgressAsError(message, {
+        processed: processedBefore + done,
+        total,
+    });
+    showError(message);
 }
 
 /**

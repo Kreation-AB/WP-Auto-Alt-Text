@@ -3,6 +3,7 @@ class Auto_Alt_Text_Request_Overhead_Test extends WP_UnitTestCase {
     public function setUp(): void {
         parent::setUp();
         Auto_Alt_Text_Activator::activate();
+        Auto_Alt_Text_Activator::reset_schema_verified();
     }
 
     public function test_schema_upgrade_is_skipped_when_version_is_current() {

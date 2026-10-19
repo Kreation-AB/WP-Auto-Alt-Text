@@ -4,6 +4,7 @@ require_once dirname(__FILE__) . '/interfaces/interface-cli-command.php';
 
 class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
     private const QUERY_POSTS_PER_PAGE = -1;
+    private const MAX_RATE_LIMIT_WAIT_SECONDS = 300;
     private const POST_TYPE = 'attachment';
     private const POST_MIME_TYPE = 'image';
     private const POST_STATUS = 'any';
@@ -99,6 +100,9 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
 
         $active_plugin = $language_context['active_plugin'];
         $language_override = $language_context['language_override'];
+
+        // A long run paces itself through rate-limit cooldowns instead of failing.
+        $this->openai->set_max_wait_seconds(self::MAX_RATE_LIMIT_WAIT_SECONDS);
 
         // Per-run choices reach the generator directly; no option is ever written.
         $this->openai->set_run_overrides(array_filter(
@@ -224,6 +228,7 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
 
             WP_CLI::success('Alt text generation completed!');
         } finally {
+            $this->openai->set_max_wait_seconds();
             $this->openai->set_run_overrides([]);
         }
     }
@@ -295,7 +300,12 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
             WP_CLI::error('Provide attachment IDs with --ids or use --all.');
         }
 
-        $results = $language_manager->bulk_generate_translations($attachment_ids);
+        $language_manager->set_max_wait_seconds(self::MAX_RATE_LIMIT_WAIT_SECONDS);
+        try {
+            $results = $language_manager->bulk_generate_translations($attachment_ids);
+        } finally {
+            $language_manager->set_max_wait_seconds();
+        }
         $summary = $this->summarize_translation_results($results);
 
         WP_CLI::success(

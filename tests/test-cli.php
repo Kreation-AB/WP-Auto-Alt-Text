@@ -48,6 +48,14 @@ namespace {
         /** @var array[] Every set_run_overrides() call, in order (the CLI resets to [] when a run ends). */
         public $run_overrides_seen = [];
 
+        /** @var float[] Every set_max_wait_seconds() call, in order. */
+        public $max_wait_seen = [];
+
+        public function set_max_wait_seconds($seconds = null) {
+            $this->max_wait_seen[] = $seconds;
+            parent::set_max_wait_seconds($seconds);
+        }
+
         public function set_run_overrides(array $overrides) {
             $this->run_overrides_seen[] = $overrides;
             parent::set_run_overrides($overrides);
@@ -156,6 +164,14 @@ namespace {
             Assert::assertCount(2, $this->openai->calls);
             Assert::assertSame('sv', $this->openai->calls[0]['language_override']);
             Assert::assertSame('sv', $this->openai->calls[1]['language_override']);
+        }
+
+        public function test_generate_waits_through_rate_limit_cooldowns() {
+            $this->create_attachments(1);
+            $this->create_cli()->generate([], ['limit' => 1]);
+
+            // A long maximum while the run lasts, then back to the default.
+            Assert::assertSame([300, null], $this->openai->max_wait_seen);
         }
 
         public function test_generate_processes_newest_attachments_first() {

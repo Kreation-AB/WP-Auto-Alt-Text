@@ -96,8 +96,20 @@ class Auto_Alt_Text_Ajax_Handler {
 
         $openai = new Auto_Alt_Text_OpenAI();
         $results = [];
+        $rate_limit_message = null;
 
         foreach ($ids as $id) {
+            // After a rate limit the rest of the list would fail the same way:
+            // report it as not processed and write nothing for it.
+            if (null !== $rate_limit_message) {
+                $results[$id] = [
+                    'success'       => false,
+                    'not_processed' => true,
+                    'message'       => $rate_limit_message,
+                ];
+                continue;
+            }
+
             if (!wp_attachment_is_image($id)) {
                 $results[$id] = [
                     'success' => false,
@@ -139,9 +151,18 @@ class Auto_Alt_Text_Ajax_Handler {
                 'success' => false,
                 'message' => $openai->get_last_error() ?: __('Failed to generate alt text', 'WP-Auto-Alt-Text'),
             ];
+            if ('rate_limit' === $openai->get_last_error_class()) {
+                $results[$id]['rate_limited'] = true;
+                $rate_limit_message = $results[$id]['message'];
+            }
         }
 
-        wp_send_json_success($results);
+        $response = ['success' => true, 'data' => $results];
+        if (null !== $rate_limit_message) {
+            $response['rate_limited'] = true;
+            $response['message']      = $rate_limit_message;
+        }
+        wp_send_json($response);
     }
     /**
      * Applies the generated alt text to the specified image attachment.
