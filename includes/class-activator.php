@@ -83,30 +83,108 @@ class Auto_Alt_Text_Activator {
 
     /**
      * Cheap per-request check: runs dbDelta only when the schema version changed.
-     * A lock keeps concurrent requests from running the upgrade at the same time.
+     * A DB-level lock keeps concurrent requests from running the upgrade at the
+     * same time.
      *
-     * @return bool Whether the schema was (re)applied.
+     * @param bool $require_current True from lazy guards in code that is about to
+     *                              write to the plugin tables: while another
+     *                              request holds the lock, wait for it (filter
+     *                              `aat_schema_upgrade_wait_seconds`, default 5)
+     *                              and, if the schema is still outdated, run the
+     *                              idempotent upgrade here rather than write
+     *                              against missing columns.
+     * @return bool Whether the schema was (re)applied by this call.
      */
-    public static function maybe_upgrade() {
+    public static function maybe_upgrade($require_current = false) {
         if (get_option(self::DB_VERSION_OPTION) === self::SCHEMA_VERSION) {
             return false;
         }
 
-        if (!add_option(self::UPGRADE_LOCK_OPTION, time(), '', 'no')) {
-            $taken_at = (int) get_option(self::UPGRADE_LOCK_OPTION);
-            if ($taken_at > time() - self::UPGRADE_LOCK_SECONDS) {
+        if (!self::acquire_upgrade_lock()) {
+            if (!$require_current) {
                 return false; // Another request is upgrading right now.
             }
-            // Stale lock (a request died mid-upgrade): take it over.
-            update_option(self::UPGRADE_LOCK_OPTION, time(), 'no');
+            if (self::wait_for_upgrade()) {
+                return false;
+            }
+            self::activate();
+            return true;
         }
 
         try {
+            // Another request may have finished the upgrade while we waited.
+            if (self::stored_schema_version() === self::SCHEMA_VERSION) {
+                return false;
+            }
             self::activate();
         } finally {
-            delete_option(self::UPGRADE_LOCK_OPTION);
+            self::release_upgrade_lock();
         }
         return true;
+    }
+
+    /** Reads the schema version straight from the DB, and refreshes this request's cached copy. */
+    private static function stored_schema_version() {
+        $wpdb = self::get_db();
+        $version = $wpdb->get_var($wpdb->prepare(
+            "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+            self::DB_VERSION_OPTION
+        ));
+        wp_cache_delete(self::DB_VERSION_OPTION, 'options');
+        return $version;
+    }
+
+    /** Polls until the lock holder has finished, or the wait runs out. @return bool Whether the schema is current. */
+    private static function wait_for_upgrade() {
+        $deadline = microtime(true) + (float) apply_filters('aat_schema_upgrade_wait_seconds', 5);
+        while (self::stored_schema_version() !== self::SCHEMA_VERSION) {
+            if (microtime(true) >= $deadline) {
+                return false;
+            }
+            usleep(250000);
+        }
+        return true;
+    }
+
+    /**
+     * Takes the upgrade lock like WP_Upgrader::create_lock(): an atomic INSERT
+     * IGNORE on the options table (bypasses the options cache, whose notoptions
+     * list can hide a lock another request just took). A stale lock is taken
+     * over with a compare-and-swap.
+     */
+    private static function acquire_upgrade_lock() {
+        $wpdb = self::get_db();
+        for ($try = 0; $try < 2; $try++) {
+            $inserted = $wpdb->query($wpdb->prepare(
+                "INSERT IGNORE INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')",
+                self::UPGRADE_LOCK_OPTION, (string) time()
+            ));
+            if ($inserted) {
+                return true;
+            }
+
+            $held = $wpdb->get_var($wpdb->prepare(
+                "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+                self::UPGRADE_LOCK_OPTION
+            ));
+            if (null === $held) {
+                continue; // Released between our INSERT and SELECT: try once more.
+            }
+            if ((int) $held > time() - self::UPGRADE_LOCK_SECONDS) {
+                return false;
+            }
+            return (bool) $wpdb->query($wpdb->prepare(
+                "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+                (string) time(), self::UPGRADE_LOCK_OPTION, $held
+            ));
+        }
+        return false;
+    }
+
+    private static function release_upgrade_lock() {
+        $wpdb = self::get_db();
+        $wpdb->delete($wpdb->options, ['option_name' => self::UPGRADE_LOCK_OPTION]);
+        wp_cache_delete(self::UPGRADE_LOCK_OPTION, 'options');
     }
 
     /**

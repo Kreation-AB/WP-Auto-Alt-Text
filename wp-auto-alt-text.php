@@ -198,19 +198,18 @@ class WP_Auto_Alt_Text_Plugin {
   * Handles the initialization of the Auto Alt Text plugin when it is loaded.
   * This method performs the following tasks:
   * - Loads the plugin's text domain for internationalization
-  * - Runs the schema upgrade (admin, cron, CLI and REST requests only)
+  * - Runs the schema upgrade (admin, cron and CLI requests only)
   * - Checks if the WooCommerce plugin is active and creates an instance of Auto_Alt_Text_WooCommerce if so
   */
 	public function handle_plugins_loaded() {
 		load_plugin_textdomain('WP-Auto-Alt-Text', false, basename(dirname(__FILE__)) . '/languages');
 
-		// Schema upgrade: never on visitor or checkout requests. Writers to the
-		// plugin tables guard themselves lazily. REST_REQUEST is not defined yet
-		// at plugins_loaded, so REST requests are caught on rest_api_init.
+		// Schema upgrade: never on visitor, checkout or REST requests (WooCommerce
+		// fires rest_api_init while rendering the block checkout). Writers to the
+		// plugin tables guard themselves lazily.
 		if (is_admin() || wp_doing_cron() || (defined('WP_CLI') && WP_CLI)) {
 			Auto_Alt_Text_Activator::maybe_upgrade();
 		}
-		add_action('rest_api_init', ['Auto_Alt_Text_Activator', 'maybe_upgrade']);
 
 		if (class_exists('WooCommerce')) {
 				new Auto_Alt_Text_WooCommerce();

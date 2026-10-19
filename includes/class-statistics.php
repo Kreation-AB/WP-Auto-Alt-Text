@@ -99,7 +99,7 @@ class Auto_Alt_Text_Statistics {
         global $wpdb;
 
         // Lazy guard: the schema upgrade does not run on frontend requests.
-        Auto_Alt_Text_Activator::maybe_upgrade();
+        Auto_Alt_Text_Activator::maybe_upgrade(true);
 
         Auto_Alt_Text_Logger::log("Tracking generation stats", "debug", [
             'image_id' => $image_id,

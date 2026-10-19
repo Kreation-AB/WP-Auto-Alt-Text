@@ -631,6 +631,12 @@ class Auto_Alt_Text_OpenAI  {
         $max_attempts = $this->max_api_attempts;
 
         for ($attempt = 1; $attempt <= $max_attempts; $attempt++) {
+            // A cooldown recorded by another request (e.g. the queue) can be long.
+            // Sleeping through it would hang a user-facing request: fail fast.
+            if ($this->rate_limiter->get_recommended_delay($estimated_tokens) > self::MAX_RETRY_DELAY_SECONDS) {
+                $this->last_error_class = 'rate_limit';
+                throw new Exception( esc_html__( 'OpenAI rate limit reached. Please wait and try again.', 'WP-Auto-Alt-Text' ) );
+            }
             $this->rate_limiter->wait_for_capacity($estimated_tokens);
             $this->rate_limiter->record_request($estimated_tokens);
 
@@ -742,6 +748,10 @@ class Auto_Alt_Text_OpenAI  {
         }
 
         if (429 === $http_code) {
+            // "Request too large ... tokens per min" can never succeed by waiting.
+            if (strpos($message, 'request too large') !== false) {
+                return 'permanent';
+            }
             return 'rate_limit';
         }
 
@@ -795,6 +805,10 @@ class Auto_Alt_Text_OpenAI  {
 
         if (strpos($error_message, 'exceeded your current quota') !== false || strpos($error_message, 'billing hard limit') !== false) {
             return __('OpenAI quota exhausted — check your OpenAI billing. Generation is paused until the quota is restored.', 'WP-Auto-Alt-Text');
+        }
+
+        if (strpos($error_message, 'request too large') !== false) {
+            return __('The request is larger than your OpenAI token-per-minute limit allows. Use a smaller image or raise the limit in your OpenAI account.', 'WP-Auto-Alt-Text');
         }
 
         if ($http_code === 429 || strpos($error_message, 'rate limit') !== false) {

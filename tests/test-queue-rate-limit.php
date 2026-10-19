@@ -23,6 +23,14 @@ class Auto_Alt_Text_Queue_Rate_Limit_Test extends WP_UnitTestCase {
                 return $pre;
             }
             $this->requests++;
+            if ('too_large' === $this->mode) {
+                return [
+                    'headers'  => [],
+                    'body'     => wp_json_encode(['error' => ['message' => 'Request too large for gpt-x in organization org-1 on tokens per min (TPM): Limit 30000, Requested 45000.', 'type' => 'tokens', 'code' => 'rate_limit_exceeded']]),
+                    'response' => ['code' => 429, 'message' => 'Too Many Requests'],
+                    'cookies'  => [],
+                ];
+            }
             if (429 === $this->mode) {
                 return [
                     'headers'  => ['retry-after' => '20'],
@@ -83,18 +91,69 @@ class Auto_Alt_Text_Queue_Rate_Limit_Test extends WP_UnitTestCase {
     }
 
     public function test_rate_limit_mid_run_stops_the_run_and_releases_the_rest() {
+        // A processor double that never touches the limiter, so only the
+        // `return false` in process_job() can stop the run.
+        $calls = 0;
+        $queue = new Auto_Alt_Text_Queue(function () use (&$calls) {
+            $calls++;
+            return ['status' => 'rate_limit', 'error' => 'Slow down'];
+        });
         $ids = [$this->image(), $this->image(), $this->image()];
         foreach ($ids as $id) {
-            $this->queue->enqueue($id, 'upload');
+            $queue->enqueue($id, 'upload');
         }
-        $this->queue->run();
+        global $wpdb;
+        $before = [];
+        foreach ($ids as $id) {
+            $before[$id] = $this->get_job($id);
+        }
 
-        $this->assertSame(1, $this->requests, 'No further OpenAI request after the 429');
+        $queue->run();
+
+        $this->assertSame(1, $calls, 'The run stops after the first rate limit');
+        $first = true;
         foreach ($ids as $id) {
             $job = $this->get_job($id);
             $this->assertSame(Auto_Alt_Text_Queue::STATUS_PENDING, $job->status);
             $this->assertSame('0', $job->attempts);
+            if ($first) {
+                $this->assertSame('Slow down', $job->last_error);
+                $this->assertGreaterThan($before[$id]->next_attempt_at, $job->next_attempt_at);
+                $first = false;
+            } else {
+                $this->assertSame($before[$id]->last_error, $job->last_error);
+                $this->assertSame($before[$id]->next_attempt_at, $job->next_attempt_at);
+            }
         }
+    }
+
+    public function test_sync_generate_does_not_sleep_through_another_requests_cooldown() {
+        (new Auto_Alt_Text_Rate_Limiter())->record_rate_limit_error(['retry-after' => '30'], 1);
+        $id = $this->image();
+        $openai = new Auto_Alt_Text_OpenAI();
+        $openai->save_api_key('sk-test-not-real');
+
+        $start = microtime(true);
+        $result = $openai->generate_alt_text(wp_get_attachment_url($id), $id, 'manual');
+        $elapsed = microtime(true) - $start;
+
+        $this->assertNull($result);
+        $this->assertSame(0, $this->requests, 'No request is sent into a known cooldown');
+        $this->assertLessThan(3, $elapsed);
+        $this->assertSame('rate_limit', $openai->get_last_error_class());
+        $this->assertStringContainsString('rate limit', $openai->get_last_error());
+    }
+
+    public function test_request_too_large_429_fails_the_job_at_once_without_a_cooldown() {
+        $this->mode = 'too_large';
+        $id = $this->image();
+        $this->queue->enqueue($id, 'upload');
+        $this->queue->run();
+
+        $job = $this->get_job($id);
+        $this->assertSame(Auto_Alt_Text_Queue::STATUS_FAILED, $job->status);
+        $this->assertStringContainsString('larger than your openai token-per-minute limit', strtolower($job->last_error));
+        $this->assertTrue((new Auto_Alt_Text_Rate_Limiter())->can_make_request());
     }
 
     public function test_limiter_blocks_until_reset_and_job_waits_then_succeeds() {

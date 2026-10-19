@@ -9,13 +9,38 @@ class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
     public function setUp(): void {
         parent::setUp();
         Auto_Alt_Text_Activator::activate();
-        delete_option(self::LOCK);
+        $this->drop_lock();
+        // Never really wait in tests; the lazy guard falls through to activate().
+        add_filter('aat_schema_upgrade_wait_seconds', '__return_zero');
     }
 
     public function tearDown(): void {
-        delete_option(self::LOCK);
+        $this->drop_lock();
         set_current_screen('front');
         parent::tearDown();
+    }
+
+    /** Inserts the lock row as another request would: straight into the DB, bypassing this request's cache. */
+    private function foreign_lock($taken_at) {
+        global $wpdb;
+        $wpdb->query($wpdb->prepare(
+            "INSERT INTO {$wpdb->options} (option_name, option_value, autoload) VALUES (%s, %s, 'no')",
+            self::LOCK, (string) $taken_at
+        ));
+    }
+
+    private function lock_row() {
+        global $wpdb;
+        return $wpdb->get_var($wpdb->prepare(
+            "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::LOCK
+        ));
+    }
+
+    private function drop_lock() {
+        global $wpdb;
+        $wpdb->delete($wpdb->options, ['option_name' => self::LOCK]);
+        wp_cache_delete(self::LOCK, 'options');
+        wp_cache_delete('notoptions', 'options');
     }
 
     private function outdate() {
@@ -52,13 +77,13 @@ class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
         $this->assertFalse($this->version_is_outdated());
     }
 
-    public function test_rest_request_upgrades() {
+    public function test_rest_api_init_does_not_upgrade() {
+        // WooCommerce's block checkout fires rest_api_init while rendering the page.
         $this->outdate();
         set_current_screen('front');
         $this->plugins_loaded();
-        $this->assertTrue($this->version_is_outdated());
         do_action('rest_api_init');
-        $this->assertFalse($this->version_is_outdated());
+        $this->assertTrue($this->version_is_outdated());
     }
 
     public function test_enqueue_upgrades_first_and_stores_the_context() {
@@ -95,24 +120,55 @@ class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
 
     public function test_fresh_lock_blocks_the_upgrade() {
         $this->outdate();
-        add_option(self::LOCK, time(), '', 'no');
+        $this->foreign_lock(time());
         $this->assertFalse(Auto_Alt_Text_Activator::maybe_upgrade());
         $this->assertTrue($this->version_is_outdated());
-        $this->assertNotFalse(get_option(self::LOCK), 'Another request\'s lock is left alone');
+        $this->assertNotNull($this->lock_row(), 'Another request\'s lock is left alone');
+    }
+
+    public function test_fresh_lock_blocks_the_upgrade_after_an_options_api_cycle() {
+        // add_option()+delete_option() leaves the name in the shared notoptions cache.
+        add_option(self::LOCK, time(), '', 'no');
+        delete_option(self::LOCK);
+        $this->outdate();
+        $this->foreign_lock(time());
+        $this->assertFalse(Auto_Alt_Text_Activator::maybe_upgrade());
+        $this->assertTrue($this->version_is_outdated());
+        $this->assertNotNull($this->lock_row());
     }
 
     public function test_stale_lock_is_taken_over() {
         $this->outdate();
-        add_option(self::LOCK, time() - 6 * MINUTE_IN_SECONDS, '', 'no');
+        $this->foreign_lock(time() - 6 * MINUTE_IN_SECONDS);
         $this->assertTrue(Auto_Alt_Text_Activator::maybe_upgrade());
         $this->assertFalse($this->version_is_outdated());
-        $this->assertFalse(get_option(self::LOCK));
+        $this->assertNull($this->lock_row());
+    }
+
+    public function test_upgrade_finished_by_another_request_is_not_repeated() {
+        $current = get_option(Auto_Alt_Text_Activator::DB_VERSION_OPTION);
+        $this->outdate(); // this request's cache now holds the old version
+        global $wpdb;
+        $wpdb->update($wpdb->options, ['option_value' => $current], ['option_name' => Auto_Alt_Text_Activator::DB_VERSION_OPTION]);
+
+        $runs = 0;
+        $counter = function ($queries) use (&$runs) {
+            $runs++;
+            return $queries;
+        };
+        add_filter('dbdelta_create_queries', $counter);
+        $result = Auto_Alt_Text_Activator::maybe_upgrade();
+        remove_filter('dbdelta_create_queries', $counter);
+
+        $this->assertFalse($result);
+        $this->assertSame(0, $runs, 'activate() must not run again');
+        $this->assertNull($this->lock_row());
     }
 
     public function test_lock_is_released_after_a_successful_upgrade() {
         $this->outdate();
         $this->assertTrue(Auto_Alt_Text_Activator::maybe_upgrade());
-        $this->assertFalse(get_option(self::LOCK));
+        $this->assertNull($this->lock_row());
     }
 
     public function test_lock_is_released_when_activate_throws() {
@@ -130,7 +186,22 @@ class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
         } finally {
             remove_filter('dbdelta_create_queries', $thrower);
         }
-        $this->assertFalse(get_option(self::LOCK));
+        $this->assertNull($this->lock_row());
         $this->assertTrue($this->version_is_outdated());
+    }
+
+    public function test_enqueue_still_stores_the_job_while_another_request_holds_the_lock() {
+        global $wpdb;
+        $table = Auto_Alt_Text_Queue::get_table_name();
+        $wpdb->query("ALTER TABLE {$table} DROP COLUMN context_post_id");
+        $this->outdate();
+        $this->foreign_lock(time());
+
+        $id = self::factory()->attachment->create();
+        $post_id = self::factory()->post->create();
+        $this->assertTrue((new Auto_Alt_Text_Queue())->enqueue($id, 'upload', $post_id));
+        $this->assertSame((string) $post_id, $wpdb->get_var($wpdb->prepare(
+            "SELECT context_post_id FROM {$table} WHERE attachment_id = %d", $id
+        )));
     }
 }
