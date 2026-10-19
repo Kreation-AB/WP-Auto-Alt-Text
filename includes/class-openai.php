@@ -699,9 +699,14 @@ class Auto_Alt_Text_OpenAI  {
                 throw new Exception( esc_html__( 'OpenAI quota exhausted — check your OpenAI billing. Generation is paused until the quota is restored.', 'WP-Auto-Alt-Text' ) );
             }
 
+            // Record every 429, also on the last attempt: the queue makes a single
+            // attempt per job and relies on the limiter to hold back the next request.
+            if ('rate_limit' === $error_class) {
+                $this->rate_limiter->record_rate_limit_error($headers, $attempt);
+            }
+
             if ($attempt < $max_attempts && in_array($error_class, ['rate_limit', 'transient'], true)) {
                 if ('rate_limit' === $error_class) {
-                    $this->rate_limiter->record_rate_limit_error($headers, $attempt);
                     continue;
                 }
                 usleep((int) ceil($this->calculate_retry_delay($headers, $attempt) * 1000000));

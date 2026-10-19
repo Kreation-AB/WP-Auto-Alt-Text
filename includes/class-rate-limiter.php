@@ -158,11 +158,13 @@ class Auto_Alt_Text_Rate_Limiter {
         $now = microtime(true);
         $request_reset_seconds = $this->parse_reset_interval_seconds($headers['x-ratelimit-reset-requests'] ?? null);
         $token_reset_seconds = $this->parse_reset_interval_seconds($headers['x-ratelimit-reset-tokens'] ?? null);
+        $retry_after_seconds = $this->parse_reset_interval_seconds($headers['retry-after'] ?? null);
         $cooldown_seconds = max(
             self::DEFAULT_COOLDOWN_SECONDS,
             min(15.0, (float) pow(2, max(0, (int) $attempt - 1))),
             $request_reset_seconds,
-            $token_reset_seconds
+            $token_reset_seconds,
+            $retry_after_seconds
         );
 
         $state['request_remaining'] = 0;

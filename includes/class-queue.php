@@ -27,7 +27,7 @@ class Auto_Alt_Text_Queue {
     /**
      * @param callable|null $processor Overridable job processor for testing.
      *                                 Signature: fn(int $attachment_id, string $generation_type, ?int $context_post_id): array
-     *                                 returning ['status' => 'success'|'retry'|'failed'|'quota'|'auth', 'error' => ?string].
+     *                                 returning ['status' => 'success'|'retry'|'failed'|'quota'|'auth'|'rate_limit', 'error' => ?string].
      */
     public function __construct(?callable $processor = null) {
         $this->processor = $processor;
@@ -234,7 +234,12 @@ class Auto_Alt_Text_Queue {
     /**
      * Processes one claimed job.
      *
-     * @return bool False when the whole run must stop (quota exhausted / rate limited).
+     * Outcomes: success finishes the job; quota and auth release it untouched and
+     * stop the run; a rate limit (429) puts it back to pending without using an
+     * attempt, scheduled after the limiter's reset, and stops the run; any other
+     * transient error retries with backoff and uses an attempt.
+     *
+     * @return bool False when the whole run must stop (quota exhausted / auth / rate limited).
      */
     private function process_job($job) {
         $attachment_id = (int) $job->attachment_id;
@@ -291,6 +296,18 @@ class Auto_Alt_Text_Queue {
                 $this->update_job($job->id, ['status' => self::STATUS_PENDING]);
                 return false;
 
+            case 'rate_limit':
+                // A 429 says nothing about this job: keep its attempts, wait for
+                // the limiter's reset (30 s to 1 h) and stop the run.
+                $delay = (int) ceil((new Auto_Alt_Text_Rate_Limiter())->get_recommended_delay());
+                $delay = max(30, min(HOUR_IN_SECONDS, $delay));
+                $this->update_job($job->id, [
+                    'status'          => self::STATUS_PENDING,
+                    'last_error'      => (string) $error,
+                    'next_attempt_at' => gmdate('Y-m-d H:i:s', time() + $delay),
+                ]);
+                return false;
+
             case 'retry':
                 $attempts = (int) $job->attempts + 1;
                 if ($attempts >= self::MAX_ATTEMPTS) {
@@ -313,8 +330,9 @@ class Auto_Alt_Text_Queue {
     }
 
     /**
-     * Default processor: one real OpenAI attempt. Wired fully in Task 5
-     * (quota monitor + rate limiter integration).
+     * Default processor: one real OpenAI attempt. Returns a status the queue
+     * understands: success, quota, auth, rate_limit (429, not counted as an
+     * attempt), failed (permanent) or retry (transient, counted).
      */
     private function default_processor($attachment_id, $generation_type, $context_post_id = null) {
         $openai = new Auto_Alt_Text_OpenAI();
@@ -331,7 +349,7 @@ class Auto_Alt_Text_Queue {
         }
 
         $class = $openai->get_last_error_class();
-        $map = ['quota' => 'quota', 'auth' => 'auth', 'permanent' => 'failed'];
+        $map = ['quota' => 'quota', 'auth' => 'auth', 'rate_limit' => 'rate_limit', 'permanent' => 'failed'];
         return [
             'status' => $map[$class] ?? 'retry',
             'error'  => $openai->get_last_error(),
