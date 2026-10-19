@@ -71,7 +71,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 
 #### WP-CLI
 
-- **`generate` och `translate` väntar ut OpenAI:s gräns för antal anrop** (högst 5 minuter åt gången) och stannar med en varning om den varar längre. Med `--resume` provas den bild som stoppade först nästa gång.
+- **`generate` och `translate` väntar ut OpenAI:s gräns för antal anrop** (högst 5 minuter åt gången) och stannar med en varning om den varar längre. Med `--resume` prövas den bild som stoppade först nästa gång.
 - **WP-CLI skriver inte längre över befintliga alt-texter som standard.** `wp auto-alt-text generate` fyller bara i saknade alt-texter, om du inte väljer något annat med `--overwrite=ai`, `--overwrite=all` eller inställningen. `--skip-existing` fungerar som förut.
 - **Namn och modell per körning.** `--naming` och `--model` gäller en körning. `--brand-tonality` fungerar som förut. En körning ändrar aldrig pluginets inställningar.
 - **Utan flaggor följer WP-CLI inställningen "Namn i alt-texten".** Tidigare tvingade `wp auto-alt-text generate` utan flaggor alltid fram det tillgänglighetsinriktade läget. Nu används samma nivå som på inställningssidan, så webbplatser som hade brand-tonalitet påslagen får "Produkt- och varumärkesnamn" även från terminalen.
