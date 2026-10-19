@@ -77,8 +77,13 @@ class Auto_Alt_Text_Activator {
      * (Removed) Version tracking is handled via dbDelta during table creation.
      */
 
+    /** Option holding the time a request took the schema upgrade lock. */
+    private const UPGRADE_LOCK_OPTION  = 'aat_schema_upgrade_lock';
+    private const UPGRADE_LOCK_SECONDS = 5 * MINUTE_IN_SECONDS;
+
     /**
      * Cheap per-request check: runs dbDelta only when the schema version changed.
+     * A lock keeps concurrent requests from running the upgrade at the same time.
      *
      * @return bool Whether the schema was (re)applied.
      */
@@ -86,7 +91,21 @@ class Auto_Alt_Text_Activator {
         if (get_option(self::DB_VERSION_OPTION) === self::SCHEMA_VERSION) {
             return false;
         }
-        self::activate();
+
+        if (!add_option(self::UPGRADE_LOCK_OPTION, time(), '', 'no')) {
+            $taken_at = (int) get_option(self::UPGRADE_LOCK_OPTION);
+            if ($taken_at > time() - self::UPGRADE_LOCK_SECONDS) {
+                return false; // Another request is upgrading right now.
+            }
+            // Stale lock (a request died mid-upgrade): take it over.
+            update_option(self::UPGRADE_LOCK_OPTION, time(), 'no');
+        }
+
+        try {
+            self::activate();
+        } finally {
+            delete_option(self::UPGRADE_LOCK_OPTION);
+        }
         return true;
     }
 

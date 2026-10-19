@@ -48,6 +48,8 @@ class Auto_Alt_Text_Queue {
      */
     public function enqueue($attachment_id, $generation_type, $context_post_id = null) {
         global $wpdb;
+        // Lazy guard: the schema upgrade does not run on frontend requests.
+        Auto_Alt_Text_Activator::maybe_upgrade();
         $attachment_id = (int) $attachment_id;
         if ($attachment_id <= 0) {
             return false;
