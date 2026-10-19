@@ -93,7 +93,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - En saknad eller avvisad API-nyckel pausar nu kön i bakgrunden i stället för att markera alla köade bilder som misslyckade.
 - En bild som kraschar under bearbetningen blockerar inte längre kön för alltid.
 - Ett 429-svar (”för många anrop”) från OpenAI använder inte längre upp ett försök i kön. Bilden väntar tills gränsen har återställts och prövas sedan igen.
-- Databasuppdateringen efter en ny version körs inte längre på besökssidor eller i kassan, och två anrop kan inte köra den samtidigt.
+- Databasuppdateringen efter en ny version körs inte längre av besökssidor eller i kassan, utan av admin, cron och WP-CLI (eller av den kod som behöver skriva till tabellerna), och två anrop kan inte köra den samtidigt.
 
 #### WooCommerce
 
