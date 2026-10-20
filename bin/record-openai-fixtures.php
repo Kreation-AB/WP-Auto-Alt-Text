@@ -109,21 +109,21 @@ function aat_record_request( $method, $url, $bearer, $payload = null ) {
 $image = 'data:image/jpeg;base64,' . base64_encode( (string) file_get_contents( $dir . '/record-image.jpg' ) );
 
 /** The plugin's request shape (Auto_Alt_Text_OpenAI::build_response_request()). */
-$responses_payload = function ( $max_output_tokens ) use ( $model, $image ) {
+$responses_payload = function ( $max_output_tokens, $text = 'Describe this image in one short sentence.', $instructions = 'You write concise alt text for images. Reply with the alt text only.' ) use ( $model, $image ) {
 	$request = array(
 		'model'             => $model['id'],
 		'input'             => array(
 			array(
 				'role'    => 'user',
 				'content' => array(
-					array( 'type' => 'input_text', 'text' => 'Describe this image in one short sentence.' ),
+					array( 'type' => 'input_text', 'text' => $text ),
 					array( 'type' => 'input_image', 'image_url' => $image, 'detail' => 'auto' ),
 				),
 			),
 		),
 		'max_output_tokens' => $max_output_tokens,
 		'store'             => false,
-		'instructions'      => 'You write concise alt text for images. Reply with the alt text only.',
+		'instructions'      => $instructions,
 	);
 	if ( null !== $model['effort'] ) {
 		$request['reasoning'] = array( 'effort' => $model['effort'] );
@@ -136,7 +136,8 @@ $recordings = array(
 	'model-get'                      => array( 'GET', '/v1/models/' . rawurlencode( $model['id'] ), $key, null ),
 	'model-not-found'                => array( 'GET', '/v1/models/aat-no-such-model', $key, null ),
 	'responses-completed'            => array( 'POST', '/v1/responses', $key, $responses_payload( $model['max_output_tokens'] ) ),
-	'responses-incomplete-max-tokens' => array( 'POST', '/v1/responses', $key, $responses_payload( 16 ) ),
+	// A short alt text fits in 16 tokens, so ask for a long answer to hit the limit.
+	'responses-incomplete-max-tokens' => array( 'POST', '/v1/responses', $key, $responses_payload( 16, 'Describe this image in detail, in at least 150 words.', 'You describe images thoroughly.' ) ),
 	'unauthorized'                   => array( 'GET', '/v1/models', 'sk-aat-invalid', null ),
 );
 
