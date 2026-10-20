@@ -213,6 +213,60 @@ Requirements: PHP 8.0+, Composer, `curl`, `unzip`, and a MySQL user that can cre
    Relative `WP_CORE_DIR` and `TESTS_CONFIG` paths resolve against the plugin directory. Re-running replaces `wp-admin` and `wp-includes` and keeps `wp-content`. An existing config is never overwritten without `FORCE=1`. The script refuses to run against a folder that has a `wp-config.php` (a real site). To use a config elsewhere, set `WP_PHPUNIT__TESTS_CONFIG` to its path.
 3. `composer test`
 
+### Checks
+
+```
+composer check           # PHP lint, PHPCS, PHPStan and PHPUnit; needs no Node or Docker
+composer test:coverage   # coverage to build/coverage/ (needs pcov or Xdebug)
+```
+
+Single steps: `composer lint:php`, `composer lint` (PHPCS), `composer analyse` (PHPStan), `composer test`.
+
+### End-to-end tests
+
+Playwright runs against wp-env (Docker) and never touches a local dev site.
+
+```
+npm ci
+npm run env:start
+npm run test:e2e
+npm run env:stop
+```
+
+### OpenAI fixtures
+
+Tests never call OpenAI. They replay recorded responses from `tests/fixtures/openai/*.json`. To re-record, run this by hand. It reads the key from the environment and writes the fixtures with secrets redacted:
+
+```
+read -rs OPENAI_API_KEY; export OPENAI_API_KEY; composer fixtures:record; unset OPENAI_API_KEY
+```
+
+### Baselines
+
+`phpstan-baseline.neon`, `phpcs.baseline.xml` and `tests/e2e/a11y-allowlist.json` only shrink. Fix the code and remove the entries; never add any. CI runs `bin/check-baselines.php <base-ref>` and fails a PR that grows one. A baseline that does not exist at the base counts as new.
+
+### CI
+
+`.github/workflows/ci.yml` runs on push to `v2.0` and `main`, on pull requests, on manual dispatch and weekly (dispatch and schedule only fire once the workflow is on the default branch `main`). Jobs:
+
+1. `setup`
+2. `static`: lint, PHPCS, PHPStan and the baseline guard
+3. `phpunit` matrix: PHP 8.0-8.4, WordPress 6.0 (minimum) and the pinned version, with and without WooCommerce, one Imagick cell, and one coverage cell that runs diff-cover on PRs
+4. `e2e`
+
+The weekly run tests the latest WordPress and WooCommerce. Results are on the PR's Checks tab and under the Actions tab of `Kreation-AB/WP-Auto-Alt-Text`.
+
+### Bumping the pinned versions
+
+The pinned versions are `WP_LATEST` and `WC_LATEST` in the workflow's top-level `env:`. Change all of these in one PR:
+
+- [ ] `.github/workflows/ci.yml`, the `env` block
+- [ ] `.wp-env.json`
+- [ ] the README install command (`WP_VERSION=... WC_VERSION=... bin/install-wp-tests.sh`)
+- [ ] the `wp-phpunit/wp-phpunit` constraint in `composer.json` (currently `^7.1`)
+
+The CHANGELOG line "Testsviten körs på WordPress 7.1.1 med WooCommerce 11.2.1" names the pinned versions and must change with them.
+
 ### Before a release
 
 `eval/smoke.php` is an opt-in live smoke test. It generates alt text for five eval images (A01, B03, C04, D05, D06) with the real API and the default model, checks the format and product-name gates, prints a table with the cost (about $0.02) and deletes what it imported. It never writes alt text. It needs WooCommerce active and the eval images fetched (`php eval/fetch.php`), reads the site's API key, and runs only by hand, never in CI or `composer check`:

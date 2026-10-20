@@ -1,1 +1,16 @@
 eval/ export-ignore
+tests/ export-ignore
+.github/ export-ignore
+bin/ export-ignore
+phpunit.xml.dist export-ignore
+phpcs.xml.dist export-ignore
+phpcs.baseline.xml export-ignore
+phpstan.neon.dist export-ignore
+phpstan-baseline.neon export-ignore
+package.json export-ignore
+package-lock.json export-ignore
+.wp-env.json export-ignore
+composer.json export-ignore
+composer.lock export-ignore
+.gitattributes export-ignore
+.gitignore export-ignore

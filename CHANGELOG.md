@@ -181,3 +181,4 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 
 - Testsviten körs på WordPress 7.1.1 med WooCommerce 11.2.1. Se "Running tests" i README (`composer test`).
 - `eval/` innehåller utvärderingskittet. Det ingår inte i releasen.
+- CI på GitHub (PHP 8.0–8.4, lägsta och senaste WordPress, med och utan WooCommerce, Imagick), PHPStan och PHPCS med baslinjer, end-to-end-tester med Playwright och inspelade OpenAI-svar som testdata.
