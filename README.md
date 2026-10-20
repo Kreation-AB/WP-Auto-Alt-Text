@@ -213,6 +213,15 @@ Requirements: PHP 8.0+, Composer, `curl`, `unzip`, and a MySQL user that can cre
    Relative `WP_CORE_DIR` and `TESTS_CONFIG` paths resolve against the plugin directory. Re-running replaces `wp-admin` and `wp-includes` and keeps `wp-content`. An existing config is never overwritten without `FORCE=1`. The script refuses to run against a folder that has a `wp-config.php` (a real site). To use a config elsewhere, set `WP_PHPUNIT__TESTS_CONFIG` to its path.
 3. `composer test`
 
+### Before a release
+
+`eval/smoke.php` is an opt-in live smoke test. It generates alt text for five eval images (A01, B03, C04, D05, D06) with the real API and the default model, checks the format and product-name gates, prints a table with the cost (about $0.02) and deletes what it imported. It never writes alt text. It needs WooCommerce active and the eval images fetched (`php eval/fetch.php`), reads the site's API key, and runs only by hand, never in CI or `composer check`:
+
+```
+wp eval-file wp-content/plugins/WP-Auto-Alt-Text/eval/smoke.php dry-run=1   # lists items, model and estimate; no request
+wp eval-file wp-content/plugins/WP-Auto-Alt-Text/eval/smoke.php
+```
+
 ## Contributing
 
 We welcome contributions to improve WP Auto Alt Text!
