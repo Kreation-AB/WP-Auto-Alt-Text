@@ -46,6 +46,10 @@
     },
     "scripts": {
         "test": "phpunit",
+        "test:coverage": [
+            "@php -r \"if (!extension_loaded('pcov') && !extension_loaded('xdebug')) { fwrite(STDERR, 'Install pcov or Xdebug to measure coverage' . PHP_EOL); exit(1); }\"",
+            "phpunit --coverage-cobertura build/coverage/cobertura.xml --coverage-html build/coverage/html"
+        ],
         "lint:php": "@php bin/lint-php.php wp-auto-alt-text.php includes admin eval tests bin",
         "lint": "phpcs",
         "analyse": "phpstan analyse --memory-limit=1G",

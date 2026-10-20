@@ -10,6 +10,13 @@
     <php>
         <env name="WP_PHPUNIT__TESTS_CONFIG" value="tests/wp-tests-config.php"/>
     </php>
+    <coverage processUncoveredFiles="true">
+        <include>
+            <directory suffix=".php">./includes</directory>
+            <directory suffix=".php">./admin</directory>
+            <file>./wp-auto-alt-text.php</file>
+        </include>
+    </coverage>
     <testsuites>
         <testsuite name="plugin">
             <directory prefix="test-" suffix=".php">./tests/</directory>

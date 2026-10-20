@@ -1,0 +1,320 @@
+name: CI
+
+# The workflow only calls commands that live in the repo (composer scripts,
+# bin/*, npm scripts). Pinned versions are kept in one checklist, see README.
+on:
+  push:
+    branches: [v2.0, main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 1'
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  WP_LATEST: '7.1.1'
+  WC_LATEST: '11.2.1'
+  NODE_VERSION: '22'
+
+jobs:
+  # Emits the PHPUnit matrix as JSON. "matrix" is not allowed in a job-level
+  # `if:`, so the weekly "latest" run is expressed as a different matrix here.
+  setup:
+    name: Resolve matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      wp_version: ${{ steps.matrix.outputs.wp_version }}
+      wc_version: ${{ steps.matrix.outputs.wc_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build matrix
+        id: matrix
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          WP_MIN="$(grep -m1 -i 'Requires at least' wp-auto-alt-text.php | sed -E 's/^.*Requires at least: *//; s/[[:space:]]+$//')"
+          [ -n "$WP_MIN" ] || { echo "Could not read 'Requires at least' from wp-auto-alt-text.php" >&2; exit 1; }
+
+          WP="$WP_LATEST"
+          WC="$WC_LATEST"
+          WC_REQUIRES_PHP=''
+
+          if [ "$EVENT_NAME" = 'schedule' ]; then
+            WP="$(curl -fsSL https://api.wordpress.org/core/version-check/1.7/ | jq -r '.offers[0].version // empty')"
+            WC_INFO="$(curl -fsSL https://api.wordpress.org/plugins/info/1.0/woocommerce.json)"
+            WC="$(jq -r '.version // empty' <<< "$WC_INFO")"
+            WC_REQUIRES_PHP="$(jq -r '.requires_php // empty' <<< "$WC_INFO")"
+            [ -n "$WP" ] && [ -n "$WC" ] || { echo "Could not resolve the latest WordPress/WooCommerce versions" >&2; exit 1; }
+
+            # Weekly "latest" run: the php-8.4 cell only.
+            MATRIX="$(jq -cn --arg wp "$WP" --arg wc "$WC" --arg req "$WC_REQUIRES_PHP" '{include: [
+              {name: "latest-php-8.4", php: "8.4", wp: $wp, wc: $wc, wc_requires_php: $req, order: "random", coverage: false, ext: ""}
+            ]}')"
+          else
+            MATRIX="$(jq -cn --arg wp "$WP" --arg wc "$WC" --arg min "$WP_MIN" '{include: ((
+              [ "8.0", "8.1", "8.2", "8.3", "8.4" ] | map({
+                name: ("php-" + .), php: ., wp: $wp, wc: $wc, wc_requires_php: "",
+                order: (if . == "8.4" then "random" else "default" end), coverage: false, ext: ""
+              })
+            ) + [
+              {name: "wp-min", php: "8.0", wp: $min, wc: "none", wc_requires_php: "", order: "default", coverage: false, ext: ""},
+              {name: "no-woo", php: "8.4", wp: $wp, wc: "none", wc_requires_php: "", order: "default", coverage: false, ext: ""},
+              {name: "imagick", php: "8.3", wp: $wp, wc: $wc, wc_requires_php: "", order: "default", coverage: true, ext: "imagick"}
+            ])}')"
+          fi
+
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "wp_version=$WP" >> "$GITHUB_OUTPUT"
+          echo "wc_version=$WC" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Matrix"
+            echo '```json'
+            jq . <<< "$MATRIX"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  static:
+    name: Static (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ github.event_name == 'schedule' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.0', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && '0' || '1' }}
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:v2
+          coverage: none
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ matrix.php }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ matrix.php }}-
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: PHP syntax lint (PHP 8.0 floor)
+        if: matrix.php == '8.0'
+        run: composer lint:php
+
+      - name: PHPCS
+        if: matrix.php == '8.3'
+        run: composer lint
+
+      - name: PHPStan
+        if: matrix.php == '8.3'
+        run: composer analyse
+
+      - name: Baselines may only shrink
+        if: matrix.php == '8.3' && github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: php bin/check-baselines.php "origin/${BASE_REF}"
+
+      - uses: actions/setup-node@v4
+        if: matrix.php == '8.3'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: JavaScript lint
+        if: matrix.php == '8.3'
+        run: |
+          npm ci --ignore-scripts
+          npm run lint:js
+
+  phpunit:
+    name: PHPUnit (${{ matrix.name }})
+    needs: [setup, static]
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ github.event_name == 'schedule' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wp_aat_tests
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      WP_VERSION: ${{ matrix.wp }}
+      WC_VERSION: ${{ matrix.wc }}
+      DB_NAME: wp_aat_tests
+      DB_USER: root
+      DB_PASSWORD: root
+      DB_HOST: 127.0.0.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ matrix.coverage && '0' || '1' }}
+
+      - name: Fetch the base branch (diff-cover)
+        if: matrix.coverage && github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch --no-tags origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mysqli, gd, mbstring${{ matrix.ext != '' && format(', {0}', matrix.ext) || '' }}
+          tools: composer:v2
+          coverage: ${{ matrix.coverage && 'pcov' || 'none' }}
+          ini-values: ${{ matrix.coverage && 'pcov.directory=., pcov.exclude="~(vendor|\.wp-core|tests)~"' || 'memory_limit=512M' }}
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ matrix.php }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ matrix.php }}-
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Use the oldest supported wp-phpunit
+        if: matrix.name == 'wp-min'
+        run: |
+          composer require --dev --no-update --no-interaction "wp-phpunit/wp-phpunit:${WP_VERSION}.*" \
+            && composer update --no-interaction --no-progress wp-phpunit/wp-phpunit
+
+      # WooCommerce's "Requires PHP" can exceed the cell's PHP (only possible
+      # in the weekly latest run). Then the cell runs without WooCommerce.
+      - name: Resolve WooCommerce for this PHP version
+        env:
+          WC_REQUIRES_PHP: ${{ matrix.wc_requires_php }}
+        run: |
+          if [ "$WC_VERSION" != 'none' ] && [ -n "$WC_REQUIRES_PHP" ] \
+            && php -r 'exit(version_compare(PHP_VERSION, $argv[1], ">=") ? 0 : 1);' "$WC_REQUIRES_PHP"; then
+            :
+          elif [ "$WC_VERSION" != 'none' ] && [ -n "$WC_REQUIRES_PHP" ]; then
+            echo "WC_VERSION=none" >> "$GITHUB_ENV"
+            echo "WooCommerce ${WC_VERSION} requires PHP ${WC_REQUIRES_PHP}; this cell runs PHP $(php -r 'echo PHP_VERSION;') without WooCommerce." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Install WordPress test environment
+        run: bin/install-wp-tests.sh | tee install.log
+
+      - name: Versions
+        run: |
+          {
+            echo "### ${{ matrix.name }}"
+            echo "- PHP: $(php -r 'echo PHP_VERSION;')"
+            echo "- $(grep '^WordPress:' install.log)"
+            echo "- $(grep '^WooCommerce:' install.log)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: PHPUnit
+        if: ${{ !matrix.coverage }}
+        run: composer test${{ matrix.order == 'random' && ' -- --order-by=random' || '' }}
+
+      - name: PHPUnit with coverage
+        if: matrix.coverage
+        run: composer test:coverage
+
+      - name: Coverage of changed lines (80% minimum)
+        if: matrix.coverage && github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          pipx install diff-cover==9.2.0
+          diff-cover build/coverage/cobertura.xml --compare-branch="origin/${BASE_REF}" --fail-under=80
+
+      - name: Coverage summary
+        if: matrix.coverage && github.event_name == 'push'
+        run: |
+          TOTAL="$(php -r '$x = simplexml_load_file("build/coverage/cobertura.xml"); printf("%.1f%%", (float) $x["line-rate"] * 100);')"
+          echo "### Line coverage: ${TOTAL}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage report
+        if: matrix.coverage && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: build/coverage/html
+          if-no-files-found: error
+
+  e2e:
+    name: E2E (wp-env + Playwright)
+    needs: [setup, static]
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ github.event_name == 'schedule' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      # Weekly "latest" run only: wp-env uses the resolved versions.
+      - name: Write wp-env override for the latest versions
+        if: github.event_name == 'schedule'
+        env:
+          WP_VERSION: ${{ needs.setup.outputs.wp_version }}
+          WC_VERSION: ${{ needs.setup.outputs.wc_version }}
+        run: |
+          jq -n --arg wp "WordPress/WordPress#${WP_VERSION}" \
+            --arg wc "https://downloads.wordpress.org/plugin/woocommerce.${WC_VERSION}.zip" \
+            '{core: $wp, plugins: [".", $wc]}' > .wp-env.override.json
+          cat .wp-env.override.json
+
+      - name: Start wp-env
+        run: npm run env:start
+
+      - name: Run Playwright
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
