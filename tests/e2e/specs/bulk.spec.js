@@ -1,7 +1,7 @@
 const path = require( 'node:path' );
 const { test, expect } = require( '@playwright/test' );
 const { RequestUtils } = require( '@wordpress/e2e-test-utils-playwright' );
-const { respText } = require( '../utils/wp-cli' );
+const { respText, wpCli, getOption, restoreOption, provenance } = require( '../utils/wp-cli' );
 
 const RESP_TEXT = respText();
 const SAMPLE = path.resolve( __dirname, '../assets/sample.jpg' );
@@ -10,6 +10,18 @@ const EXISTING = 'Befintlig text';
 test.describe( 'bulk generation', () => {
 	let requestUtils;
 	let ids = [];
+
+	let savedAutoGenerate;
+
+	// Auto-generate off: no upload job can write alt text behind the test's back.
+	test.beforeAll( () => {
+		savedAutoGenerate = getOption( 'auto_alt_text_auto_generate' );
+		wpCli( [ 'option', 'update', 'auto_alt_text_auto_generate', '0' ] );
+	} );
+
+	test.afterAll( () => {
+		restoreOption( 'auto_alt_text_auto_generate', savedAutoGenerate );
+	} );
 
 	test.beforeAll( async ( { baseURL } ) => {
 		requestUtils = await RequestUtils.setup( {
@@ -39,6 +51,9 @@ test.describe( 'bulk generation', () => {
 		}
 		await requestUtils.rest( { method: 'POST', path: `/wp/v2/media/${ ids[ 0 ] }`, data: { alt_text: EXISTING } } );
 
+		expect( await altOf( ids[ 1 ] ) ).toBe( '' );
+		expect( await altOf( ids[ 2 ] ) ).toBe( '' );
+
 		await page.goto( '/wp-admin/upload.php?mode=list' );
 		for ( const id of ids ) {
 			await page.locator( `#cb-select-${ id }` ).check();
@@ -52,5 +67,8 @@ test.describe( 'bulk generation', () => {
 		expect( await altOf( ids[ 0 ] ) ).toBe( EXISTING );
 		expect( await altOf( ids[ 1 ] ) ).toBe( RESP_TEXT );
 		expect( await altOf( ids[ 2 ] ) ).toBe( RESP_TEXT );
+		// The bulk path records 'batch' (class-ajax-handler.php:140), not 'upload'.
+		expect( provenance( ids[ 1 ] ).source ).toBe( 'batch' );
+		expect( provenance( ids[ 2 ] ).source ).toBe( 'batch' );
 	} );
 } );

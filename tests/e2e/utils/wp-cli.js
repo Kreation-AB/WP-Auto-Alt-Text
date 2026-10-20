@@ -22,18 +22,28 @@ function wpCli( args ) {
 	} ).trim();
 }
 
-/** An option's value, or null when it does not exist. */
+/**
+ * An option's value, or null when it does not exist. Any other failure (for
+ * example a stopped container) is rethrown so state is never lost silently.
+ */
 function getOption( name ) {
 	try {
 		return wpCli( [ 'option', 'get', name ] );
 	} catch ( e ) {
+		if ( ! String( e.stderr || '' ).includes( 'Could not get' ) ) {
+			throw e;
+		}
 		return null;
 	}
 }
 
-/** Restores an option saved with getOption(): null deletes it. */
+/**
+ * Restores an option saved with getOption(): null deletes it. An empty string
+ * also deletes it, because wp-env run drops empty arguments; that is only
+ * right for options whose absence reads the same as '' (the model option).
+ */
 function restoreOption( name, value ) {
-	if ( value === null ) {
+	if ( value === null || value === '' ) {
 		try {
 			wpCli( [ 'option', 'delete', name ] );
 		} catch ( e ) {
@@ -52,4 +62,13 @@ function respText() {
 	return message.content.find( ( part ) => part.type === 'output_text' ).text;
 }
 
-module.exports = { wpCli, getOption, restoreOption, respText };
+/** The decoded _aat_alt_provenance meta of an attachment, or null when unset. */
+function provenance( id ) {
+	try {
+		return JSON.parse( wpCli( [ 'post', 'meta', 'get', String( id ), '_aat_alt_provenance', '--format=json' ] ) );
+	} catch ( e ) {
+		return null;
+	}
+}
+
+module.exports = { provenance, wpCli, getOption, restoreOption, respText };

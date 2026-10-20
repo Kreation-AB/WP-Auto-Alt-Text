@@ -1,6 +1,6 @@
 const { test, expect } = require( '@playwright/test' );
 const { RequestUtils } = require( '@wordpress/e2e-test-utils-playwright' );
-const { wpCli, getOption, restoreOption } = require( '../utils/wp-cli' );
+const { wpCli, getOption, restoreOption, provenance } = require( '../utils/wp-cli' );
 
 // Inside the wp-env tests container the plugin's tests/ directory is mapped here.
 const SAMPLE_IN_CONTAINER = '/var/www/html/wp-content/aat-e2e-tests/e2e/assets/sample.jpg';
@@ -18,6 +18,7 @@ function altOf( id ) {
 test.describe( 'WooCommerce product save', () => {
 	let requestUtils;
 	let savedNaming;
+	let savedAutoGenerate;
 	let productId;
 	let attachmentId;
 
@@ -28,6 +29,7 @@ test.describe( 'WooCommerce product save', () => {
 		} );
 		savedNaming = getOption( 'auto_alt_text_naming' );
 		wpCli( [ 'option', 'update', 'auto_alt_text_naming', 'product' ] );
+		savedAutoGenerate = getOption( 'auto_alt_text_auto_generate' );
 	} );
 
 	test.afterEach( async () => {
@@ -43,9 +45,12 @@ test.describe( 'WooCommerce product save', () => {
 
 	test.afterAll( async () => {
 		restoreOption( 'auto_alt_text_naming', savedNaming );
+		restoreOption( 'auto_alt_text_auto_generate', savedAutoGenerate );
 	} );
 
 	test( 'a product save queues its image and the queue writes alt text naming the product', async ( { page } ) => {
+		// Off during the import so no upload job exists; the product save must queue the image itself.
+		wpCli( [ 'option', 'update', 'auto_alt_text_auto_generate', '0' ] );
 		attachmentId = Number( wpCli( [ 'media', 'import', SAMPLE_IN_CONTAINER, '--porcelain' ] ) );
 		const product = await requestUtils.rest( {
 			method: 'POST',
@@ -53,6 +58,10 @@ test.describe( 'WooCommerce product save', () => {
 			data: { name: PRODUCT_NAME, images: [ { id: attachmentId } ] },
 		} );
 		productId = product.id;
+		// Both the save hook and the queue tick need auto-generate on.
+		wpCli( [ 'option', 'update', 'auto_alt_text_auto_generate', '1' ] );
+		expect( altOf( attachmentId ) ).toBe( '' );
+		expect( provenance( attachmentId ) ).toBeNull();
 
 		await page.goto( `/wp-admin/post.php?post=${ productId }&action=edit` );
 		await page.locator( '#publish' ).click();
@@ -66,5 +75,7 @@ test.describe( 'WooCommerce product save', () => {
 		}
 
 		expect( alt ).toContain( PRODUCT_NAME );
+		// The provenance source is the job's generation type: the product save queued it.
+		expect( provenance( attachmentId ).source ).toBe( 'woocommerce' );
 	} );
 } );

@@ -1,7 +1,7 @@
 const path = require( 'node:path' );
 const { test, expect } = require( '@playwright/test' );
 const { RequestUtils } = require( '@wordpress/e2e-test-utils-playwright' );
-const { respText } = require( '../utils/wp-cli' );
+const { respText, wpCli, getOption, restoreOption, provenance } = require( '../utils/wp-cli' );
 
 const RESP_TEXT = respText();
 const SAMPLE = path.resolve( __dirname, '../assets/sample.jpg' );
@@ -9,6 +9,18 @@ const SAMPLE = path.resolve( __dirname, '../assets/sample.jpg' );
 test.describe( 'media modal', () => {
 	let requestUtils;
 	let ids = [];
+
+	let savedAutoGenerate;
+
+	// Auto-generate off: no upload job can write alt text behind the test's back.
+	test.beforeAll( () => {
+		savedAutoGenerate = getOption( 'auto_alt_text_auto_generate' );
+		wpCli( [ 'option', 'update', 'auto_alt_text_auto_generate', '0' ] );
+	} );
+
+	test.afterAll( () => {
+		restoreOption( 'auto_alt_text_auto_generate', savedAutoGenerate );
+	} );
 
 	test.beforeAll( async ( { baseURL } ) => {
 		requestUtils = await RequestUtils.setup( {
@@ -33,6 +45,7 @@ test.describe( 'media modal', () => {
 	test( 'generates, previews and applies alt text in the media modal', async ( { page } ) => {
 		const media = await requestUtils.uploadMedia( SAMPLE );
 		ids.push( media.id );
+		expect( ( await requestUtils.rest( { path: `/wp/v2/media/${ media.id }` } ) ).alt_text ).toBe( '' );
 
 		// With mode=grid in the URL core drops the item parameter, so set the mode first.
 		await page.goto( '/wp-admin/upload.php?mode=grid' );
@@ -49,5 +62,7 @@ test.describe( 'media modal', () => {
 		await expect
 			.poll( async () => ( await requestUtils.rest( { path: `/wp/v2/media/${ media.id }` } ) ).alt_text )
 			.toBe( RESP_TEXT );
+		// Apply records the text as written by the modal ('manual'), not by an upload job.
+		expect( provenance( media.id ).source ).toBe( 'manual' );
 	} );
 } );
