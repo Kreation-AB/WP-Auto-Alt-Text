@@ -210,7 +210,7 @@ Requirements: PHP 8.0+, Composer, `curl`, `unzip`, and a MySQL user that can cre
    | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` | `wp_aat_tests`, `root`, empty, `localhost` | Database settings |
    | `FORCE` | unset | `1` overwrites an existing config |
 
-   Relative `WP_CORE_DIR` and `TESTS_CONFIG` paths resolve against the plugin directory. Re-running replaces `wp-admin` and `wp-includes` and keeps `wp-content`. An existing config is never overwritten without `FORCE=1`. To use a config elsewhere, set `WP_PHPUNIT__TESTS_CONFIG` to its path.
+   Relative `WP_CORE_DIR` and `TESTS_CONFIG` paths resolve against the plugin directory. Re-running replaces `wp-admin` and `wp-includes` and keeps `wp-content`. An existing config is never overwritten without `FORCE=1`. The script refuses to run against a folder that has a `wp-config.php` (a real site). To use a config elsewhere, set `WP_PHPUNIT__TESTS_CONFIG` to its path.
 3. `composer test`
 
 ## Contributing

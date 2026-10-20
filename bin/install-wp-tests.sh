@@ -29,6 +29,25 @@ DIST_FILE="tests/wp-tests-config.php.dist"
 
 [ -f "$DIST_FILE" ] || die "$DIST_FILE not found."
 
+# Resolve WP_CORE_DIR to an absolute path without creating it, then refuse to
+# touch a real site: the core folders are removed below.
+if [ -d "$WP_CORE_DIR" ]; then
+	ABS_WP_CORE_DIR="$(cd "$WP_CORE_DIR" && pwd -P)"
+else
+	case "$WP_CORE_DIR" in
+		/*) ABS_WP_CORE_DIR="$WP_CORE_DIR" ;;
+		*) ABS_WP_CORE_DIR="$PLUGIN_DIR/$WP_CORE_DIR" ;;
+	esac
+fi
+if [ "$ABS_WP_CORE_DIR" = "/" ]; then
+	echo "Refusing to install into /: point WP_CORE_DIR at a dedicated test folder." >&2
+	exit 1
+fi
+if [ -e "$ABS_WP_CORE_DIR/wp-config.php" ]; then
+	echo "Refusing to install into $ABS_WP_CORE_DIR: it looks like a real WordPress site (wp-config.php found). Point WP_CORE_DIR at a dedicated test folder." >&2
+	exit 1
+fi
+
 # Download a URL to a file, failing with a clear message on HTTP errors.
 download() {
 	local url="$1" dest="$2"
