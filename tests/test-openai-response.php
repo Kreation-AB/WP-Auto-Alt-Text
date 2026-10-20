@@ -1,46 +1,29 @@
 <?php
 class Auto_Alt_Text_OpenAI_Response_Test extends WP_UnitTestCase {
-    private $requests = [];
-    private $responses = [];
+    /** @var Auto_Alt_Text_Test_OpenAI_Fixtures */
+    private $fixtures;
 
     public function setUp(): void {
         parent::setUp();
         Auto_Alt_Text_Activator::activate();
-        $this->requests = [];
-        $this->responses = [];
-        add_filter('pre_http_request', function ($pre, $args, $url) {
-            if (strpos($url, 'openai.com') === false) {
-                return $pre;
-            }
-            $this->requests[] = [
-                'url'    => $url,
-                'method' => $args['method'] ?? 'POST',
-                'body'   => isset($args['body']) ? json_decode((string) $args['body'], true) : null,
-            ];
-            $next = array_shift($this->responses) ?? [200, ['output_text' => 'Fallback text']];
-            return [
-                'headers'  => [],
-                'body'     => wp_json_encode($next[1]),
-                'response' => ['code' => $next[0], 'message' => ''],
-                'cookies'  => [],
-            ];
-        }, 10, 3);
+        $this->fixtures = new Auto_Alt_Text_Test_OpenAI_Fixtures();
+        $this->fixtures->install();
     }
 
-    private function queue_response($code, array $body) {
-        $this->responses[] = [$code, $body];
+    public function tear_down(): void {
+        $this->fixtures->uninstall();
+        parent::tear_down();
     }
 
+    private function requests() {
+        return $this->fixtures->requests();
+    }
+
+    /** The recorded completed response with its output text replaced. */
     private static function message($text) {
-        return [
-            'status' => 'completed',
-            'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => $text]]]],
-            'usage'  => ['input_tokens' => 100, 'output_tokens' => 20, 'total_tokens' => 120],
-        ];
-    }
-
-    private static function incomplete() {
-        return ['status' => 'incomplete', 'incomplete_details' => ['reason' => 'max_output_tokens'], 'output' => []];
+        $fixture = Auto_Alt_Text_Test_OpenAI_Fixtures::load('responses-completed');
+        $fixture['body']['output'][0]['content'][0]['text'] = $text;
+        return $fixture;
     }
 
     private function openai() {
@@ -54,12 +37,12 @@ class Auto_Alt_Text_OpenAI_Response_Test extends WP_UnitTestCase {
     }
 
     public function test_request_uses_the_registry_model_and_is_not_stored() {
-        $this->queue_response(200, self::message('A canola field.'));
+        $this->fixtures->queue_response(self::message('A canola field.'));
         $id = $this->image();
 
         $this->openai()->generate_alt_text(wp_get_attachment_url($id), $id, 'manual', true);
 
-        $body = $this->requests[0]['body'];
+        $body = $this->requests()[0]['body'];
         $this->assertSame('gpt-6.1-sol', $body['model']);
         $this->assertFalse($body['store']);
         $this->assertSame(1500, $body['max_output_tokens']);
@@ -68,22 +51,18 @@ class Auto_Alt_Text_OpenAI_Response_Test extends WP_UnitTestCase {
 
     public function test_reasoning_effort_is_sent_when_the_model_has_one() {
         update_option(Auto_Alt_Text_Models::OPTION, 'gpt-6-luna');
-        $this->queue_response(200, self::message('A canola field.'));
+        $this->fixtures->queue_response(self::message('A canola field.'));
         $id = $this->image();
 
         $this->openai()->generate_alt_text(wp_get_attachment_url($id), $id, 'manual', true);
 
-        $this->assertSame(['effort' => 'none'], $this->requests[0]['body']['reasoning']);
+        $this->assertSame(['effort' => 'none'], $this->requests()[0]['body']['reasoning']);
     }
 
     public function test_text_is_read_only_from_output_text_items() {
-        $this->queue_response(200, [
-            'status' => 'completed',
-            'output' => [
-                ['type' => 'reasoning', 'summary' => [['type' => 'summary_text', 'text' => 'Thinking about the field']], 'content' => [['type' => 'reasoning_text', 'text' => 'Thinking about the field']]],
-                ['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'A canola field.']]],
-            ],
-        ]);
+        $fixture = self::message('A canola field.');
+        array_unshift($fixture['body']['output'], ['type' => 'reasoning', 'summary' => [['type' => 'summary_text', 'text' => 'Thinking about the field']], 'content' => [['type' => 'reasoning_text', 'text' => 'Thinking about the field']]]);
+        $this->fixtures->queue_response($fixture);
         $id = $this->image();
 
         $text = $this->openai()->generate_alt_text(wp_get_attachment_url($id), $id, 'manual', true);
@@ -92,21 +71,21 @@ class Auto_Alt_Text_OpenAI_Response_Test extends WP_UnitTestCase {
     }
 
     public function test_incomplete_response_is_retried_once_with_twice_the_limit() {
-        $this->queue_response(200, self::incomplete());
-        $this->queue_response(200, self::message('A canola field.'));
+        $this->fixtures->queue('responses-incomplete-max-tokens');
+        $this->fixtures->queue_response(self::message('A canola field.'));
         $id = $this->image();
 
         $text = $this->openai()->generate_alt_text(wp_get_attachment_url($id), $id, 'manual', true);
 
         $this->assertSame('A canola field.', $text);
-        $this->assertCount(2, $this->requests);
-        $this->assertSame(1500, $this->requests[0]['body']['max_output_tokens']);
-        $this->assertSame(3000, $this->requests[1]['body']['max_output_tokens']);
+        $this->assertCount(2, $this->requests());
+        $this->assertSame(1500, $this->requests()[0]['body']['max_output_tokens']);
+        $this->assertSame(3000, $this->requests()[1]['body']['max_output_tokens']);
     }
 
     public function test_incomplete_twice_fails_permanently_without_writing() {
-        $this->queue_response(200, self::incomplete());
-        $this->queue_response(200, self::incomplete());
+        $this->fixtures->queue('responses-incomplete-max-tokens');
+        $this->fixtures->queue('responses-incomplete-max-tokens');
         $openai = $this->openai();
         $id = $this->image();
 
@@ -125,42 +104,35 @@ class Auto_Alt_Text_OpenAI_Response_Test extends WP_UnitTestCase {
     }
 
     public function test_incomplete_for_another_reason_is_never_saved() {
-        $partial = 'A canola field under a';
-        $this->queue_response(200, [
-            'status'             => 'incomplete',
-            'incomplete_details' => ['reason' => 'content_filter'],
-            'output'             => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => $partial]]]],
-            'output_text'        => $partial,
-        ]);
+        $this->fixtures->queue('responses-incomplete-content-filter');
         $openai = $this->openai();
         $id = $this->image();
 
         $this->assertNull($openai->generate_alt_text(wp_get_attachment_url($id), $id, 'manual'));
         $this->assertSame('permanent', $openai->get_last_error_class());
         $this->assertStringContainsString('stopped before finishing', $openai->get_last_error());
-        $this->assertCount(1, $this->requests, 'Only a token-limit stop is retried');
+        $this->assertCount(1, $this->requests(), 'Only a token-limit stop is retried');
         $this->assertSame('', get_post_meta($id, '_wp_attachment_image_alt', true));
         $this->assertSame('', get_post_meta($id, Auto_Alt_Text_Provenance::META_KEY, true));
         $this->assertSame(0, $this->cache_entries($id));
     }
 
     public function test_refusal_fails_permanently_without_retry() {
-        $this->queue_response(200, [
-            'status' => 'completed',
-            'output' => [['type' => 'message', 'content' => [['type' => 'refusal', 'refusal' => 'I cannot help with that.']]]],
-        ]);
+        $this->fixtures->queue('responses-refusal');
         $openai = $this->openai();
         $id = $this->image();
 
         $this->assertNull($openai->generate_alt_text(wp_get_attachment_url($id), $id, 'manual'));
         $this->assertSame('permanent', $openai->get_last_error_class());
         $this->assertStringContainsString('declined', $openai->get_last_error());
-        $this->assertCount(1, $this->requests);
+        $this->assertCount(1, $this->requests());
         $this->assertSame('', get_post_meta($id, '_wp_attachment_image_alt', true));
     }
 
     public function test_empty_response_is_transient() {
-        $this->queue_response(200, ['status' => 'completed', 'output' => []]);
+        $fixture = Auto_Alt_Text_Test_OpenAI_Fixtures::load('responses-completed');
+        $fixture['body']['output'] = [];
+        $this->fixtures->queue_response($fixture);
         $openai = $this->openai();
         $id = $this->image();
 
@@ -169,46 +141,47 @@ class Auto_Alt_Text_OpenAI_Response_Test extends WP_UnitTestCase {
     }
 
     public function test_translation_puts_its_rules_in_the_instructions_field() {
-        $this->queue_response(200, self::message('Ett rapsfält.'));
+        $this->fixtures->queue_response(self::message('Ett rapsfält.'));
 
         $text = $this->openai()->translate_alt_text('A canola field.', 'en', 'sv');
 
         $this->assertSame('Ett rapsfält.', $text);
-        $body = $this->requests[0]['body'];
+        $body = $this->requests()[0]['body'];
         $this->assertStringContainsString('professional translator', $body['instructions']);
         $this->assertCount(1, $body['input']);
         $this->assertSame('user', $body['input'][0]['role']);
     }
 
     public function test_api_key_check_lists_models_without_spending_tokens() {
-        $this->queue_response(200, ['data' => []]);
+        $this->fixtures->queue('models-list');
 
         $this->assertTrue($this->openai()->test_api_key());
-        $this->assertSame('GET', $this->requests[0]['method']);
-        $this->assertStringEndsWith('/v1/models', $this->requests[0]['url']);
+        $this->assertSame('GET', $this->requests()[0]['method']);
+        $this->assertStringEndsWith('/v1/models', $this->requests()[0]['url']);
     }
 
     public function test_api_key_check_fails_on_401() {
-        $this->queue_response(401, ['error' => ['message' => 'Incorrect API key provided']]);
+        $this->fixtures->queue('unauthorized');
 
         $this->assertFalse($this->openai()->test_api_key());
     }
 
     public function test_model_availability_is_checked_per_model() {
-        $this->queue_response(200, ['id' => 'gpt-6-luna']);
-        $this->queue_response(404, ['error' => ['message' => 'The model does not exist']]);
+        $model = Auto_Alt_Text_Test_OpenAI_Fixtures::load('model-get');
+        $model['body']['id'] = 'gpt-6-luna';
+        $this->fixtures->queue_response($model)->queue('model-not-found');
         $openai = $this->openai();
 
         $this->assertTrue($openai->is_model_available('gpt-6-luna'));
         $this->assertFalse($openai->is_model_available('gpt-retired'));
-        $this->assertStringEndsWith('/v1/models/gpt-retired', $this->requests[1]['url']);
+        $this->assertStringEndsWith('/v1/models/gpt-retired', $this->requests()[1]['url']);
     }
 
     public function test_model_availability_is_unknown_without_a_key() {
         delete_option('auto_alt_text_api_key');
 
         $this->assertNull((new Auto_Alt_Text_OpenAI())->is_model_available('gpt-6-luna'));
-        $this->assertCount(0, $this->requests);
+        $this->assertCount(0, $this->requests());
     }
 
     public function test_low_detail_images_are_estimated_far_cheaper_than_auto() {
