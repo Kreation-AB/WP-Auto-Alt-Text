@@ -2,6 +2,7 @@
     "name": "kimbranzell/auto-alt-text",
     "description": "A WordPress plugin that automatically generates alt text for images.",
     "type": "wordpress-plugin",
+    "license": "Apache-2.0",
     "require": {
         "php": ">=8.0"
     },
@@ -16,6 +17,17 @@
             "wp-content/plugins/{$name}/": ["type:wordpress-plugin"]
         }
     },
+    "config": {
+        "platform": {
+            "php": "8.0.30"
+        },
+        "process-timeout": 0,
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true,
+            "digitalrevolution/php-codesniffer-baseline": true
+        },
+        "sort-packages": true
+    },
     "minimum-stability": "dev",
     "prefer-stable": true,
     "require-dev": {
@@ -24,6 +36,7 @@
         "yoast/phpunit-polyfills": "^2.0"
     },
     "scripts": {
-        "test": "phpunit"
+        "test": "phpunit",
+        "lint:php": "@php bin/lint-php.php wp-auto-alt-text.php includes admin eval tests bin"
     }
 }

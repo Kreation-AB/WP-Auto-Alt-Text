@@ -1,6 +1,5 @@
 vendor/
 docs/
-composer.lock
 phpunit.xml
 .phpunit.result.cache
 tests/wp-tests-config.php
@@ -8,5 +7,12 @@ tests/wp-tests-config.php
 !README.md
 !CHANGELOG.md
 .*/
+!.github/
+node_modules/
+build/
+test-results/
+playwright-report/
+artifacts/
+.wp-env.override.json
 eval/images/
 eval/results/
