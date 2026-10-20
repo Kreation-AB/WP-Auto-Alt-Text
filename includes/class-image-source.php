@@ -160,6 +160,8 @@ class Auto_Alt_Text_Image_Source {
         $editor = wp_get_image_editor($path);
 
         if (!is_wp_error($editor)) {
+            // Stripping metadata drops the EXIF orientation, so apply it to the pixels first.
+            $editor->maybe_exif_rotate();
             $size = $editor->get_size();
             [$width, $height] = self::target_size(
                 (int) $size['width'],
@@ -214,7 +216,7 @@ class Auto_Alt_Text_Image_Source {
                     }
                     if (in_array($saved['mime-type'], self::API_MIMES, true) && file_exists($saved['path'])) {
                         if ($editor instanceof WP_Image_Editor_Imagick && !self::strip_metadata($saved['path'])) {
-                            return new WP_Error('image_metadata_failed', __('The image could not be prepared. Please try again.', 'WP-Auto-Alt-Text'));
+                            return new WP_Error('image_metadata_failed', __('The image could not be prepared.', 'WP-Auto-Alt-Text'));
                         }
                         $this->image_url = self::data_url($saved['path'], $saved['mime-type']);
                         return true;
@@ -233,15 +235,19 @@ class Auto_Alt_Text_Image_Source {
 
     /**
      * Imagick only: core's editor keeps EXIF (incl. GPS) even on resize, so the temp copy is
-     * rewritten without the EXIF, XMP, IPTC and 8BIM profiles. The ICC profile stays. GD never writes EXIF.
+     * rewritten with only its colour profiles (ICC/ICM) and without the JPEG comment. GD never writes EXIF.
      */
     private static function strip_metadata($path) {
         try {
             $image = new Imagick($path);
-            foreach (['exif', 'xmp', 'iptc', '8bim'] as $name) {
-                $image->profileImage($name, null);
+            $image->profileImage('!icc,!icm,*', null);
+            $image->deleteImageProperty('comment');
+            $webp = function_exists('wp_get_webp_info') ? wp_get_webp_info($path) : [];
+            if ('lossless' === ($webp['type'] ?? '')) {
+                $image->setOption('webp:lossless', 'true'); // keep a lossless copy lossless
+            } else {
+                $image->setImageCompressionQuality(self::QUALITY);
             }
-            $image->setImageCompressionQuality(self::QUALITY);
             $written = $image->writeImage($path);
             $image->clear();
             return $written;

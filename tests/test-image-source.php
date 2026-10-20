@@ -255,6 +255,25 @@ class Auto_Alt_Text_Image_Source_Test extends WP_UnitTestCase {
         }
     }
 
+    public function test_exif_orientation_is_applied_to_the_copy() {
+        if (!function_exists('exif_read_data')) {
+            $this->markTestSkipped('Reading EXIF orientation needs ext-exif');
+        }
+        $path = DIR_TESTDATA . '/images/test-image-rotated-90ccw.jpg';
+        $raw = getimagesize($path);
+        // Not create_upload_object(): WordPress would swap in its own pre-rotated file on upload.
+        $upload = wp_upload_bits('aat-rotated.jpg', null, file_get_contents($path));
+        $id = self::factory()->attachment->create(['post_mime_type' => 'image/jpeg', 'file' => $upload['file']]);
+        update_attached_file($id, $upload['file']);
+        $source = Auto_Alt_Text_Image_Source::for_attachment($id, 'auto');
+        $parts = self::data_url_parts($source->input_image()['image_url']);
+        $source->cleanup();
+        wp_delete_file($upload['file']);
+
+        // The copy is capped to ~1 MP, so compare the aspect: raw is portrait, the rotated copy landscape.
+        $this->assertSame($raw[0] < $raw[1], $parts['width'] > $parts['height'], 'The copy is rotated upright');
+    }
+
     public function test_without_an_editor_a_supported_original_is_sent_as_is() {
         $id = $this->upload('canola.jpg');
         add_filter('wp_image_editors', '__return_empty_array');
@@ -267,6 +286,10 @@ class Auto_Alt_Text_Image_Source_Test extends WP_UnitTestCase {
     }
 
     public function test_without_an_editor_avif_is_unsupported() {
+        // The test removes every editor, so guard on upload support rather than editor support.
+        if (!in_array('image/avif', get_allowed_mime_types(), true)) {
+            $this->markTestSkipped('AVIF uploads need WordPress 6.5+');
+        }
         $id = $this->upload('avif-lossy.avif');
         add_filter('wp_image_editors', '__return_empty_array');
 

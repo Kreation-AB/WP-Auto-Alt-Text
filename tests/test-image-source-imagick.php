@@ -11,6 +11,11 @@ class Auto_Alt_Text_Image_Source_Imagick_Test extends WP_UnitTestCase {
     }
 
     private function output_blob($file, $detail) {
+        // The format must really go through Imagick (a CI image can lack a WebP or AVIF delegate, which
+        // would silently fall back to GD).
+        if (!(wp_get_image_editor(DIR_TESTDATA . '/images/' . $file) instanceof WP_Image_Editor_Imagick)) {
+            $this->markTestSkipped('Imagick cannot handle ' . $file);
+        }
         $id = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/' . $file);
         $source = Auto_Alt_Text_Image_Source::for_attachment($id, $detail);
         $this->assertNotWPError($source);
@@ -57,26 +62,42 @@ class Auto_Alt_Text_Image_Source_Imagick_Test extends WP_UnitTestCase {
         $this->assertLessThan(1.0, $this->min_alpha($this->output_blob('avif-transparent.avif', 'auto')));
     }
 
-    private function assert_no_exif($blob) {
+    /** The profile names a file carries, e.g. ['icc']. */
+    private function profile_names($blob) {
+        $image = new Imagick();
+        $image->readImageBlob($blob);
+        return array_keys($image->getImageProfiles('*', false) ?: []) ?: [];
+    }
+
+    private function assert_stripped($file, $blob) {
+        $source = new Imagick(DIR_TESTDATA . '/images/' . $file);
+        $this->assertNotEmpty($source->getImageProperties('exif:*'), 'The fixture must carry EXIF');
+        $expected = array_values(array_intersect(array_keys($source->getImageProfiles('*', false)), ['icc', 'icm']));
+        sort($expected);
+
         $image = new Imagick();
         $image->readImageBlob($blob);
         $this->assertSame([], $image->getImageProperties('exif:*'));
+        $names = $this->profile_names($blob);
+        sort($names);
+        $this->assertSame($expected, $names, 'Only the colour profile may remain');
     }
 
     public function test_resized_copy_carries_no_exif() {
         $this->requireImagick();
         $file = '2004-07-22-DSC_0007.jpg';
-        $this->assertNotEmpty(@exif_read_data(DIR_TESTDATA . '/images/' . $file)['Make'] ?? null, 'The fixture must carry EXIF');
-        $this->assert_no_exif($this->output_blob($file, 'low'));
+        $blob = $this->output_blob($file, 'low');
+        $info = getimagesizefromstring($blob);
+        $this->assertSame([340, 512], [$info[0], $info[1]], 'low resizes this image');
+        $this->assert_stripped($file, $blob);
     }
 
     public function test_unresized_copy_carries_no_exif() {
         $this->requireImagick();
         $file = '2004-07-22-DSC_0007.jpg';
-        $this->assertNotEmpty(@exif_read_data(DIR_TESTDATA . '/images/' . $file)['Make'] ?? null, 'The fixture must carry EXIF');
         $blob = $this->output_blob($file, 'auto');
         $info = getimagesizefromstring($blob);
         $this->assertSame([426, 640], [$info[0], $info[1]], 'auto leaves this image unresized');
-        $this->assert_no_exif($blob);
+        $this->assert_stripped($file, $blob);
     }
 }

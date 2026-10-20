@@ -6,6 +6,18 @@
 class Auto_Alt_Text_Schema_Upgrade_Test extends WP_UnitTestCase {
     private const LOCK = 'aat_schema_upgrade_lock';
 
+    /**
+     * Upgrades run DDL inside the lock, which commits the lock row and the outdated version past
+     * each test's rollback. Restore both once the class is done, so later tests don't wait on them.
+     */
+    public static function wpTearDownAfterClass() {
+        global $wpdb;
+        $wpdb->delete($wpdb->options, ['option_name' => self::LOCK]);
+        wp_cache_delete(self::LOCK, 'options');
+        wp_cache_delete('notoptions', 'options');
+        Auto_Alt_Text_Activator::activate();
+    }
+
     public function setUp(): void {
         parent::setUp();
         Auto_Alt_Text_Activator::activate();
