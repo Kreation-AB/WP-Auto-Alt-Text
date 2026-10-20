@@ -17,6 +17,10 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 env:
   WP_LATEST: '7.1.1'
   WC_LATEST: '11.2.1'
@@ -28,6 +32,7 @@ jobs:
   setup:
     name: Resolve matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       wp_version: ${{ steps.matrix.outputs.wp_version }}
@@ -50,8 +55,8 @@ jobs:
           WC_REQUIRES_PHP=''
 
           if [ "$EVENT_NAME" = 'schedule' ]; then
-            WP="$(curl -fsSL https://api.wordpress.org/core/version-check/1.7/ | jq -r '.offers[0].version // empty')"
-            WC_INFO="$(curl -fsSL https://api.wordpress.org/plugins/info/1.0/woocommerce.json)"
+            WP="$(curl -fsSL --retry 3 --retry-delay 5 https://api.wordpress.org/core/version-check/1.7/ | jq -r '.offers[0].version // empty')"
+            WC_INFO="$(curl -fsSL --retry 3 --retry-delay 5 https://api.wordpress.org/plugins/info/1.0/woocommerce.json)"
             WC="$(jq -r '.version // empty' <<< "$WC_INFO")"
             WC_REQUIRES_PHP="$(jq -r '.requires_php // empty' <<< "$WC_INFO")"
             [ -n "$WP" ] && [ -n "$WC" ] || { echo "Could not resolve the latest WordPress/WooCommerce versions" >&2; exit 1; }
@@ -73,9 +78,11 @@ jobs:
             ])}')"
           fi
 
-          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
-          echo "wp_version=$WP" >> "$GITHUB_OUTPUT"
-          echo "wc_version=$WC" >> "$GITHUB_OUTPUT"
+          {
+            echo "matrix=$MATRIX"
+            echo "wp_version=$WP"
+            echo "wc_version=$WC"
+          } >> "$GITHUB_OUTPUT"
           {
             echo "### Matrix"
             echo '```json'
@@ -86,7 +93,7 @@ jobs:
   static:
     name: Static (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
-    continue-on-error: ${{ github.event_name == 'schedule' }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -149,7 +156,7 @@ jobs:
     name: PHPUnit (${{ matrix.name }})
     needs: [setup, static]
     runs-on: ubuntu-latest
-    continue-on-error: ${{ github.event_name == 'schedule' }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
@@ -182,7 +189,7 @@ jobs:
         if: matrix.coverage && github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: git fetch --no-tags origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+        run: git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -190,7 +197,7 @@ jobs:
           extensions: mysqli, gd, mbstring${{ matrix.ext != '' && format(', {0}', matrix.ext) || '' }}
           tools: composer:v2
           coverage: ${{ matrix.coverage && 'pcov' || 'none' }}
-          ini-values: ${{ matrix.coverage && 'pcov.directory=., pcov.exclude="~(vendor|\.wp-core|tests)~"' || 'memory_limit=512M' }}
+          ini-values: ${{ matrix.coverage && 'pcov.directory=., pcov.exclude="~(vendor|\.wp-core|tests)~"' || '' }}
 
       - name: Get Composer cache directory
         id: composer-cache
@@ -205,10 +212,13 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
 
-      - name: Use the oldest supported wp-phpunit
-        if: matrix.name == 'wp-min'
+      # wp-phpunit must match the WordPress under test (major.minor.*, since
+      # wp-phpunit may lack an exact patch release).
+      - name: Match wp-phpunit to the WordPress version
+        if: matrix.name == 'wp-min' || startsWith(matrix.name, 'latest')
         run: |
-          composer require --dev --no-update --no-interaction "wp-phpunit/wp-phpunit:${WP_VERSION}.*" \
+          WP_MM="$(cut -d. -f1,2 <<< "$WP_VERSION")"
+          composer require --dev --no-update --no-interaction "wp-phpunit/wp-phpunit:${WP_MM}.*" \
             && composer update --no-interaction --no-progress wp-phpunit/wp-phpunit
 
       # WooCommerce's "Requires PHP" can exceed the cell's PHP (only possible
@@ -217,6 +227,7 @@ jobs:
         env:
           WC_REQUIRES_PHP: ${{ matrix.wc_requires_php }}
         run: |
+          # shellcheck disable=SC2016
           if [ "$WC_VERSION" != 'none' ] && [ -n "$WC_REQUIRES_PHP" ] \
             && php -r 'exit(version_compare(PHP_VERSION, $argv[1], ">=") ? 0 : 1);' "$WC_REQUIRES_PHP"; then
             :
@@ -256,6 +267,7 @@ jobs:
       - name: Coverage summary
         if: matrix.coverage && github.event_name == 'push'
         run: |
+          # shellcheck disable=SC2016
           TOTAL="$(php -r '$x = simplexml_load_file("build/coverage/cobertura.xml"); printf("%.1f%%", (float) $x["line-rate"] * 100);')"
           echo "### Line coverage: ${TOTAL}" >> "$GITHUB_STEP_SUMMARY"
 
@@ -271,7 +283,7 @@ jobs:
     name: E2E (wp-env + Playwright)
     needs: [setup, static]
     runs-on: ubuntu-latest
-    continue-on-error: ${{ github.event_name == 'schedule' }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

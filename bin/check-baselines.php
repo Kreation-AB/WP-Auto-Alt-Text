@@ -4,12 +4,16 @@
  *
  * Usage: php bin/check-baselines.php <base-ref>
  *
- * Totals compared (a missing file counts as 0):
+ * A file absent at the base counts as newly created: it is reported as `new`
+ * and never fails (baselines only shrink after they are first created).
+ *
+ * Totals compared:
  * - phpstan-baseline.neon: sum of the `count:` values.
  * - phpcs.baseline.xml: number of <violation elements.
  * - tests/e2e/a11y-allowlist.json: length of the JSON array.
  *
- * Exit 1 and name the file when a total grows; exit 0 otherwise.
+ * Exit 1 and name the file when a total grows; exit 2 when the ref does not
+ * resolve; exit 0 otherwise.
  */
 
 if ( PHP_SAPI !== 'cli' ) {
@@ -23,6 +27,20 @@ if ( $argc < 2 || '' === trim( $argv[1] ) ) {
 
 $root = dirname( __DIR__ );
 $base = $argv[1];
+
+exec(
+	sprintf(
+		'git -C %s rev-parse --verify --quiet %s 2>/dev/null',
+		escapeshellarg( $root ),
+		escapeshellarg( $base . '^{commit}' )
+	),
+	$rev_output,
+	$rev_status
+);
+if ( 0 !== $rev_status ) {
+	fwrite( STDERR, sprintf( "Base ref '%s' does not resolve to a commit. Fetch it first (e.g. fetch-depth: 0).\n", $base ) );
+	exit( 2 );
+}
 
 /**
  * Read a file at a git ref, or null when it does not exist there.
@@ -62,8 +80,14 @@ $failed = false;
 foreach ( $counters as $path => $count ) {
 	$before_text = aat_baseline_at_ref( $root, $base, $path );
 	$after_text  = aat_baseline_at_head( $root, $path );
-	$before      = null === $before_text ? 0 : $count( $before_text );
 	$after       = null === $after_text ? 0 : $count( $after_text );
+
+	if ( null === $before_text ) {
+		echo sprintf( "new  %s %d\n", $path, $after );
+		continue;
+	}
+
+	$before = $count( $before_text );
 
 	if ( $after > $before ) {
 		fwrite( STDERR, sprintf( "FAIL %s grew from %d to %d (baselines only shrink).\n", $path, $before, $after ) );

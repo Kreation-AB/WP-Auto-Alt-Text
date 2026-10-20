@@ -10,7 +10,7 @@
     <php>
         <env name="WP_PHPUNIT__TESTS_CONFIG" value="tests/wp-tests-config.php"/>
     </php>
-    <coverage processUncoveredFiles="true">
+    <coverage>
         <include>
             <directory suffix=".php">./includes</directory>
             <directory suffix=".php">./admin</directory>
