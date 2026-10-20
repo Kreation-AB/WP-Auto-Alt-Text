@@ -1,0 +1,99 @@
+{
+    "status": 200,
+    "headers": {
+        "content-type": "application/json",
+        "openai-processing-ms": "1599",
+        "openai-version": "2020-10-01"
+    },
+    "body": {
+        "id": "resp_redacted",
+        "object": "response",
+        "created_at": 1792501647,
+        "status": "incomplete",
+        "access_programs": null,
+        "background": false,
+        "billing": {
+            "payer": "developer"
+        },
+        "completed_at": null,
+        "error": null,
+        "frequency_penalty": 0,
+        "incomplete_details": {
+            "reason": "max_output_tokens"
+        },
+        "instructions": "You describe images thoroughly.",
+        "max_output_tokens": 16,
+        "max_tool_calls": null,
+        "model": "gpt-6.1-sol",
+        "moderation": null,
+        "output": [
+            {
+                "id": "rs_redacted",
+                "type": "reasoning",
+                "content": [],
+                "encrypted_content": "gAAAAABq12eQBxilLh1zJkP703jqQMHH6li0cZdulbBliXzTxStVO4T8x_Q7uO1OqsE18rkg14IMwPgNSlrpvJKqncTzLeoLCwtVN2Tkjja57E4m7bFkWSY8oaN9CJeUzjXKSzYlZgFcHUBZ81KBljNY-5q9pTAZ3Hqc_lJZwgKS0X3EejvVA6aysbq1rNUNDWBcE6zOBX4FyHOt3s-oSuZABv1VwKVWCPsjDYdXthLMSIg05zt7NVaD9-9EQUswbWFWKOdWz0VpdPopOwmd8oh2AAMPEiTJCg2j1BMspoueGUS1rbBrscCrnYW6FIPwfCL0qGVPdeGTZwf0fncj9bsBQNhoDRVmmN4A3ShCjnXX9eiFY24T0wQFkkPSLvTACeHVHBENp-dAURC1jIpOeXsOCZ4vgjqPNutp3hBmWgPCjq3lftoDSKEVF_5Hbtq1tkvz7XZEJT212vDT23OT9aJibqmcJcKbW3MIEM9kuUoXfF-obWMts0eIH0Rowv_DcmN2t1BX2tT4vi6BjdO06O7wmR4agmmmi9Urj9qVsXRgw8tL1cfLLPY2RC1-v8RBHPZnycPXM5GG2t21eXvMQHjUw3cJhn-wvF-E_4rhofpYG4oawETvIQ9p2XofqwXVhIyPp32-uczJ0Ls5d10vsO4TqT5gJ7SNbL-B8NHvXwQsvZWXwNqzHbBSqgtQFh_qhl6y4NIWCtC2uwPg7BFtJtz6Xbzr72At47paKHtBP8DvLaP2nRvtTF8KYdfzkhhwXBvToL3auTQY0cRbZEglKjK2H-ex5Aac0esb7Mq-GnJySDiqa6OtFJyF-yDTwZ1KEFR9A00dYu8UqsIvgB7hB72vevzSTm28Ele4sdydg00BTXAzOQaj5mIilXE7gRY4JgC0WYWSwCuP3md8Elj2w34ZTKremW4eWtssqcEgKV8D5k660HrVSZTOowruDUyWA0IV_dzPj2sB08FFkjwfxX6cyZbLY4RGTIQEbEsPKhbPNmMjNfRhxJ4sNJjMKYvTLp-6Sdk1srn-GfBj11VU9a5Hoe0ML2lsfK-AQF7gwzxvdBENhtL63IOSdvhmLRzbJ6MqZGaWBBRKhz37FvXwAKtpo2XVSjiZGldxz20JNN6XKbDsJriTF3fTWW4Z2zAExV0gkp5Zp4TqwbGS8Aza5AhB-heGZhvdR3UB420_4rd4YH0VnG4mULRJYh6fGNLuvBQtRiaCrzl8MmYXCac0i5p_OiIfIhHkErj7pEFGdKq0Q8GmH18KLAyCsnxUV6dN-2_7wDGAGIwb8JF59GAQ3t4KRs-LfrrZgQ==",
+                "summary": []
+            }
+        ],
+        "parallel_tool_calls": true,
+        "presence_penalty": 0,
+        "previous_response_id": null,
+        "prompt_cache_key": null,
+        "prompt_cache_retention": "24h",
+        "reasoning": {
+            "context": "all_turns",
+            "effort": "low",
+            "mode": "standard",
+            "summary": null
+        },
+        "safety_identifier": null,
+        "service_tier": "default",
+        "store": false,
+        "temperature": 1,
+        "text": {
+            "format": {
+                "type": "text"
+            },
+            "verbosity": "medium"
+        },
+        "tool_choice": "auto",
+        "tool_usage": {
+            "image_gen": {
+                "input_tokens": 0,
+                "input_tokens_details": {
+                    "image_tokens": 0,
+                    "text_tokens": 0
+                },
+                "output_tokens": 0,
+                "output_tokens_details": {
+                    "image_tokens": 0,
+                    "text_tokens": 0
+                },
+                "total_tokens": 0
+            },
+            "web_search": {
+                "num_requests": 0
+            }
+        },
+        "tools": [],
+        "top_logprobs": 0,
+        "top_p": 0.98,
+        "truncation": "disabled",
+        "usage": {
+            "input_tokens": 33,
+            "input_tokens_details": {
+                "cache_write_tokens": 0,
+                "cached_tokens": 0
+            },
+            "output_tokens": 16,
+            "output_tokens_details": {
+                "reasoning_tokens": 16
+            },
+            "total_tokens": 49
+        },
+        "user": null,
+        "metadata": []
+    },
+    "_recorded_at": "2026-10-20",
+    "_model": "gpt-6.1-sol"
+}

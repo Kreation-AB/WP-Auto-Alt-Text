@@ -1,0 +1,17 @@
+{
+    "status": 200,
+    "headers": {
+        "content-type": "application/json",
+        "openai-processing-ms": "454",
+        "openai-version": "2020-10-01"
+    },
+    "body": {
+        "id": "gpt-6.1-sol",
+        "object": "model",
+        "created": 1790552874,
+        "owned_by": "system",
+        "shutdown_date": null
+    },
+    "_recorded_at": "2026-10-20",
+    "_model": "gpt-6.1-sol"
+}

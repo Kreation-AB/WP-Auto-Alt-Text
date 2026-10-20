@@ -1,0 +1,111 @@
+{
+    "status": 200,
+    "headers": {
+        "content-type": "application/json",
+        "openai-processing-ms": "2593",
+        "openai-version": "2020-10-01",
+        "x-ratelimit-limit-requests": "10000",
+        "x-ratelimit-limit-tokens": "4000000",
+        "x-ratelimit-remaining-requests": "9999",
+        "x-ratelimit-remaining-tokens": "4000000",
+        "x-ratelimit-reset-requests": "6ms",
+        "x-ratelimit-reset-tokens": "0s"
+    },
+    "body": {
+        "id": "resp_redacted",
+        "object": "response",
+        "created_at": 1792501644,
+        "status": "completed",
+        "access_programs": null,
+        "background": false,
+        "billing": {
+            "payer": "developer"
+        },
+        "completed_at": 1792501647,
+        "error": null,
+        "frequency_penalty": 0,
+        "incomplete_details": null,
+        "instructions": "You write concise alt text for images. Reply with the alt text only.",
+        "max_output_tokens": 1500,
+        "max_tool_calls": null,
+        "model": "gpt-6.1-sol",
+        "moderation": null,
+        "output": [
+            {
+                "id": "msg_redacted",
+                "type": "message",
+                "status": "completed",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "annotations": [],
+                        "logprobs": [],
+                        "text": "A black capital letter A on a white background."
+                    }
+                ],
+                "phase": "final_answer",
+                "role": "assistant"
+            }
+        ],
+        "parallel_tool_calls": true,
+        "presence_penalty": 0,
+        "previous_response_id": null,
+        "prompt_cache_key": null,
+        "prompt_cache_retention": "24h",
+        "reasoning": {
+            "context": "all_turns",
+            "effort": "low",
+            "mode": "standard",
+            "summary": null
+        },
+        "safety_identifier": null,
+        "service_tier": "default",
+        "store": false,
+        "temperature": 1,
+        "text": {
+            "format": {
+                "type": "text"
+            },
+            "verbosity": "medium"
+        },
+        "tool_choice": "auto",
+        "tool_usage": {
+            "image_gen": {
+                "input_tokens": 0,
+                "input_tokens_details": {
+                    "image_tokens": 0,
+                    "text_tokens": 0
+                },
+                "output_tokens": 0,
+                "output_tokens_details": {
+                    "image_tokens": 0,
+                    "text_tokens": 0
+                },
+                "total_tokens": 0
+            },
+            "web_search": {
+                "num_requests": 0
+            }
+        },
+        "tools": [],
+        "top_logprobs": 0,
+        "top_p": 0.98,
+        "truncation": "disabled",
+        "usage": {
+            "input_tokens": 38,
+            "input_tokens_details": {
+                "cache_write_tokens": 0,
+                "cached_tokens": 0
+            },
+            "output_tokens": 14,
+            "output_tokens_details": {
+                "reasoning_tokens": 0
+            },
+            "total_tokens": 52
+        },
+        "user": null,
+        "metadata": []
+    },
+    "_recorded_at": "2026-10-20",
+    "_model": "gpt-6.1-sol"
+}
