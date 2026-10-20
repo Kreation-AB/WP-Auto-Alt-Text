@@ -12,7 +12,8 @@ const BLOCKING = [ 'serious', 'critical' ];
  * the string stored in the allowlist: the parts are joined with a single space,
  * then digit runs inside `#id` tokens and `[attr="value"]` selectors become
  * `<id>`, so per-run values such as attachment IDs (#attachments-123-x) match
- * on every run. Nothing else is normalized.
+ * on every run. Nothing else is normalized. Allowlist targets are stored in
+ * this normalized form (e.g. `#attachments-<id>-x`, `[data-id="<id>"]`).
  *
  * @param {string[]} target axe node target.
  * @return {string} Stable target string.
@@ -37,9 +38,21 @@ async function checkA11y( page, { pageName, include } ) {
 	const allowlist = JSON.parse( fs.readFileSync( ALLOWLIST, 'utf8' ) ).filter( ( e ) => e.page === pageName );
 	const includes = Array.isArray( include ) ? include : [ include ];
 
-	// Let fade-ins and transitions finish: axe reads colours mid-animation, so
-	// color-contrast results would otherwise differ from run to run.
-	await page.evaluate( () => Promise.all( document.getAnimations().map( ( a ) => a.finished.catch( () => {} ) ) ) );
+	// Every include must be rendered, otherwise that region would go unscanned
+	// while the other includes keep the check green.
+	for ( const selector of includes ) {
+		expect( await page.locator( selector ).count(), `"${ selector }" is not on the "${ pageName }" page, so it was not scanned` ).toBeGreaterThan( 0 );
+	}
+
+	// Let fade-ins and transitions finish: axe reads colours mid-animation (the
+	// preview buttons fail color-contrast mid-transition), so results would
+	// otherwise differ from run to run. Only finite animations are awaited, and
+	// the wait is capped, so an infinite spinner cannot hang the test.
+	await page.evaluate( () => {
+		const finite = document.getAnimations().filter( ( a ) => Number.isFinite( a.effect?.getComputedTiming().endTime ) );
+		const settled = Promise.all( finite.map( ( a ) => a.finished.catch( () => {} ) ) );
+		return Promise.race( [ settled, new Promise( ( resolve ) => setTimeout( resolve, 2000 ) ) ] );
+	} );
 
 	let builder = new AxeBuilder( { page } ).withTags( TAGS );
 	for ( const selector of includes ) {

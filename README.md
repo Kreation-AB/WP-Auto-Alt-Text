@@ -243,7 +243,7 @@ read -rs OPENAI_API_KEY; export OPENAI_API_KEY; composer fixtures:record; unset 
 
 ### Baselines
 
-`phpstan-baseline.neon`, `phpcs.baseline.xml` and `tests/e2e/a11y-allowlist.json` only shrink. Fix the code and remove the entries; never add any. CI runs `bin/check-baselines.php <base-ref>` and fails a PR that grows one. A baseline that does not exist at the base counts as new.
+`phpstan-baseline.neon`, `phpcs.baseline.xml` and `tests/e2e/a11y-allowlist.json` only shrink. Fix the code and remove the entries; never add any. CI runs `bin/check-baselines.php <base-ref>` and fails a PR that grows one. A baseline that does not exist at the base counts as new. Allowlist targets are stored normalized: digit runs inside ids and attribute values are written as `<id>` (see `tests/e2e/utils/axe.js`).
 
 ### CI
 
