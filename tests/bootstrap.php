@@ -26,4 +26,7 @@ tests_add_filter( 'setup_theme', function () {
 	}
 } );
 
+require_once __DIR__ . '/helpers/openai-fixture-redact.php';
+require_once __DIR__ . '/helpers/class-aat-openai-fixtures.php';
+
 require $_tests_dir . '/includes/bootstrap.php';

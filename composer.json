@@ -49,6 +49,7 @@
         "lint:php": "@php bin/lint-php.php wp-auto-alt-text.php includes admin eval tests bin",
         "lint": "phpcs",
         "analyse": "phpstan analyse --memory-limit=1G",
+        "fixtures:record": "@php bin/record-openai-fixtures.php",
         "check": ["@lint:php", "@lint", "@analyse", "@test"]
     }
 }

@@ -1,0 +1,18 @@
+{
+	"status": 429,
+	"headers": {
+		"content-type": "application/json",
+		"retry-after": "20",
+		"x-ratelimit-reset-requests": "20s",
+		"x-ratelimit-reset-tokens": "6m0s"
+	},
+	"body": {
+		"error": {
+			"message": "Rate limit reached for requests",
+			"type": "requests",
+			"param": null,
+			"code": "rate_limit_exceeded"
+		}
+	},
+	"_synthetic": true
+}

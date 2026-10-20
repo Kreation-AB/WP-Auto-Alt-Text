@@ -1,0 +1,24 @@
+{
+	"status": 200,
+	"headers": {"content-type": "application/json"},
+	"body": {
+		"id": "resp_redacted",
+		"object": "response",
+		"status": "incomplete",
+		"incomplete_details": {"reason": "content_filter"},
+		"model": "gpt-6.1-sol",
+		"output": [
+			{
+				"id": "msg_redacted",
+				"type": "message",
+				"role": "assistant",
+				"status": "incomplete",
+				"content": [
+					{"type": "output_text", "text": "A person standing on a", "annotations": []}
+				]
+			}
+		],
+		"usage": {"input_tokens": 1300, "output_tokens": 6, "total_tokens": 1306, "output_tokens_details": {"reasoning_tokens": 0}}
+	},
+	"_synthetic": true
+}

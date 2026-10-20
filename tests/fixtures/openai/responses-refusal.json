@@ -1,0 +1,23 @@
+{
+	"status": 200,
+	"headers": {"content-type": "application/json"},
+	"body": {
+		"id": "resp_redacted",
+		"object": "response",
+		"status": "completed",
+		"model": "gpt-6.1-sol",
+		"output": [
+			{
+				"id": "msg_redacted",
+				"type": "message",
+				"role": "assistant",
+				"status": "completed",
+				"content": [
+					{"type": "refusal", "refusal": "I can't help with that request."}
+				]
+			}
+		],
+		"usage": {"input_tokens": 1300, "output_tokens": 12, "total_tokens": 1312, "output_tokens_details": {"reasoning_tokens": 0}}
+	},
+	"_synthetic": true
+}
