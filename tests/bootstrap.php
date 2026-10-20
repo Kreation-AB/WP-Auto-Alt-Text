@@ -30,3 +30,6 @@ require_once __DIR__ . '/helpers/openai-fixture-redact.php';
 require_once __DIR__ . '/helpers/class-aat-openai-fixtures.php';
 
 require $_tests_dir . '/includes/bootstrap.php';
+
+// The e2e mock needs ABSPATH, so it loads after WordPress's bootstrap. Without AAT_E2E_MOCK it registers nothing.
+require_once __DIR__ . '/e2e/mu-plugins/aat-mock-openai.php';

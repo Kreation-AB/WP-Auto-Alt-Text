@@ -1,0 +1,21 @@
+{
+  "core": "WordPress/WordPress#7.1.1",
+  "plugins": [
+    ".",
+    "https://downloads.wordpress.org/plugin/woocommerce.11.2.1.zip"
+  ],
+  "port": 8888,
+  "testsPort": 8889,
+  "env": {
+    "tests": {
+      "mappings": {
+        "wp-content/mu-plugins": "./tests/e2e/mu-plugins",
+        "wp-content/aat-e2e-tests": "./tests"
+      },
+      "config": {
+        "AAT_E2E_MOCK": true,
+        "AUTO_ALT_TEXT_OPENAI_API_KEY": "sk-e2e-not-real"
+      }
+    }
+  }
+}

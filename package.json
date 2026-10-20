@@ -1,0 +1,21 @@
+{
+  "name": "wp-auto-alt-text-dev",
+  "private": true,
+  "description": "Development tooling for WP Auto Alt Text (browser tests). Not part of the plugin release.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "env:start": "wp-env start",
+    "env:stop": "wp-env stop",
+    "test:e2e": "playwright test --config tests/e2e/playwright.config.js",
+    "lint:js": "node --check admin/js/app.js",
+    "wp": "wp-env run tests-cli wp"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
+    "@wordpress/e2e-test-utils-playwright": "^3.0.0",
+    "@wordpress/env": "^11.17.0"
+  }
+}
