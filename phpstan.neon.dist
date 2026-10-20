@@ -1,0 +1,16 @@
+includes:
+    - vendor/szepeviktor/phpstan-wordpress/extension.neon
+    - phpstan-baseline.neon
+
+parameters:
+    level: 5
+    # Pinned so the baseline is identical across PHP versions.
+    phpVersion: 80000
+    paths:
+        - wp-auto-alt-text.php
+        - includes
+        - admin
+    scanFiles:
+        - vendor/php-stubs/woocommerce-stubs/woocommerce-stubs.php
+    bootstrapFiles:
+        - includes/config.php

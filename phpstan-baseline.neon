@@ -1,0 +1,295 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Action callback returns array but should not return anything\.$#'
+			identifier: return.void
+			count: 1
+			path: admin/class-admin.php
+
+		-
+			message: '#^Call to function method_exists\(\) with WP_Screen and ''is_block_editor'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: admin/class-admin.php
+
+		-
+			message: '#^Static method Auto_Alt_Text_Activator\:\:column_exists\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: includes/class-activator.php
+
+		-
+			message: '#^Strict comparison using \!\=\= between list\<non\-empty\-string\|null\> and false will always evaluate to true\.$#'
+			identifier: notIdentical.alwaysTrue
+			count: 1
+			path: includes/class-activator.php
+
+		-
+			message: '#^Strict comparison using \=\=\= between mixed~''1\.3'' and ''1\.3'' will always evaluate to false\.$#'
+			identifier: identical.alwaysFalse
+			count: 1
+			path: includes/class-activator.php
+
+		-
+			message: '#^Unreachable statement \- code above always terminates\.$#'
+			identifier: deadCode.unreachable
+			count: 12
+			path: includes/class-ajax-handler.php
+
+		-
+			message: '#^Call to function in_array\(\) with arguments ''da'', array\{''sv'', ''no'', ''dk'', ''fi'', ''en'', ''es'', ''fr'', ''de'', \.\.\.\} and true will always evaluate to false\.$#'
+			identifier: function.impossibleType
+			count: 1
+			path: includes/class-cli.php
+
+		-
+			message: '#^Call to function is_string\(\) with non\-falsy\-string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: includes/class-cli.php
+
+		-
+			message: '#^Call to function method_exists\(\) with ''WP_CLI'' and ''warning'' will always evaluate to false\.$#'
+			identifier: function.impossibleType
+			count: 1
+			path: includes/class-cli.php
+
+		-
+			message: '#^Call to static method error\(\) on an unknown class WP_CLI\.$#'
+			identifier: class.notFound
+			count: 15
+			path: includes/class-cli.php
+
+		-
+			message: '#^Call to static method halt\(\) on an unknown class WP_CLI\.$#'
+			identifier: class.notFound
+			count: 2
+			path: includes/class-cli.php
+
+		-
+			message: '#^Call to static method line\(\) on an unknown class WP_CLI\.$#'
+			identifier: class.notFound
+			count: 15
+			path: includes/class-cli.php
+
+		-
+			message: '#^Call to static method log\(\) on an unknown class WP_CLI\.$#'
+			identifier: class.notFound
+			count: 12
+			path: includes/class-cli.php
+
+		-
+			message: '#^Call to static method success\(\) on an unknown class WP_CLI\.$#'
+			identifier: class.notFound
+			count: 8
+			path: includes/class-cli.php
+
+		-
+			message: '#^Call to static method warning\(\) on an unknown class WP_CLI\.$#'
+			identifier: class.notFound
+			count: 2
+			path: includes/class-cli.php
+
+		-
+			message: '#^Function WP_CLI\\Utils\\format_items not found\.$#'
+			identifier: function.notFound
+			count: 2
+			path: includes/class-cli.php
+
+		-
+			message: '#^Function WP_CLI\\Utils\\make_progress_bar not found\.$#'
+			identifier: function.notFound
+			count: 1
+			path: includes/class-cli.php
+
+		-
+			message: '#^PHPDoc tag @param references unknown parameter\: \$images$#'
+			identifier: parameter.notFound
+			count: 1
+			path: includes/class-cli.php
+
+		-
+			message: '#^Parameter \#1 \$array \(list\<string\>\) of array_values is already a list, call has no effect\.$#'
+			identifier: arrayValues.list
+			count: 1
+			path: includes/class-cli.php
+
+		-
+			message: '#^Property Auto_Alt_Text_CLI\:\:\$statistics is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: includes/class-cli.php
+
+		-
+			message: '#^Variable \$language_context might not be defined\.$#'
+			identifier: variable.undefined
+			count: 2
+			path: includes/class-cli.php
+
+		-
+			message: '#^Variable \$requested_languages might not be defined\.$#'
+			identifier: variable.undefined
+			count: 2
+			path: includes/class-cli.php
+
+		-
+			message: '#^Parameter \#1 \$text of function esc_attr expects string, int\<0, max\> given\.$#'
+			identifier: argument.type
+			count: 1
+			path: includes/class-image-process.php
+
+		-
+			message: '#^Property Auto_Alt_Text_Image_Process\:\:\$language_manager is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: includes/class-image-process.php
+
+		-
+			message: '#^Property Auto_Alt_Text_Image_Process\:\:\$openai is never read, only written\.$#'
+			identifier: property.onlyWritten
+			count: 1
+			path: includes/class-image-process.php
+
+		-
+			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: includes/class-language-manager.php
+
+		-
+			message: '#^Call to function is_string\(\) with non\-falsy\-string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: includes/class-language-manager.php
+
+		-
+			message: '#^If condition is always false\.$#'
+			identifier: if.alwaysFalse
+			count: 1
+			path: includes/class-language-manager.php
+
+		-
+			message: '#^Method Auto_Alt_Text_Language_Manager\:\:generate_multilingual_alt_text\(\) should return string\|null but returns array\.$#'
+			identifier: return.type
+			count: 2
+			path: includes/class-language-manager.php
+
+		-
+			message: '#^Method Auto_Alt_Text_Language_Manager\:\:generate_multilingual_alt_text\(\) should return string\|null but returns array\<mixed\>\.$#'
+			identifier: return.type
+			count: 1
+			path: includes/class-language-manager.php
+
+		-
+			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: includes/class-openai.php
+
+		-
+			message: '#^Call to function is_string\(\) with non\-falsy\-string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: includes/class-openai.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: includes/class-openai.php
+
+		-
+			message: '#^Instanceof between WP_Error and WP_Error will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: includes/class-openai.php
+
+		-
+			message: '#^Method Auto_Alt_Text_OpenAI\:\:callAPI\(\) never returns null so it can be removed from the return type\.$#'
+			identifier: return.unusedType
+			count: 1
+			path: includes/class-openai.php
+
+		-
+			message: '#^Call to function is_array\(\) with array will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 2
+			path: includes/class-rate-limiter.php
+
+		-
+			message: '#^Class Text_Diff_Renderer_inline referenced with incorrect case\: Text_Diff_Renderer_Inline\.$#'
+			identifier: class.nameCase
+			count: 1
+			path: includes/class-statistics-page.php
+
+		-
+			message: '#^Constant WPINC not found\.$#'
+			identifier: constant.notFound
+			count: 3
+			path: includes/class-statistics-page.php
+
+		-
+			message: '#^Method Auto_Alt_Text_Statistics_Page\:\:render_feedback_stats\(\) is unused\.$#'
+			identifier: method.unused
+			count: 1
+			path: includes/class-statistics-page.php
+
+		-
+			message: '#^Parameter \#1 \$args of function paginate_links expects array\{base\?\: string, format\?\: string, total\?\: int, current\?\: int, aria_current\?\: string, show_all\?\: bool, end_size\?\: int, mid_size\?\: int, \.\.\.\}, array\{base\: string, format\: '''', current\: int\<1, max\>, total\: float, prev_next\: true, prev_text\: string, next_text\: string, type\: ''array''\} given\.$#'
+			identifier: argument.type
+			count: 1
+			path: includes/class-statistics-page.php
+
+		-
+			message: '#^Parameter \#1 \$engine of class Text_Diff constructor expects string, list\<string\>\|false given\.$#'
+			identifier: argument.type
+			count: 1
+			path: includes/class-statistics-page.php
+
+		-
+			message: '#^Parameter \#1 \$text of function esc_html expects string, int given\.$#'
+			identifier: argument.type
+			count: 2
+			path: includes/class-statistics-page.php
+
+		-
+			message: '#^Right side of && is always true\.$#'
+			identifier: booleanAnd.rightAlwaysTrue
+			count: 1
+			path: includes/class-statistics-page.php
+
+		-
+			message: '#^Parameter \#1 \$args of function get_posts expects array\{numberposts\?\: int, category\?\: int\|string, include\?\: array\<int\>, exclude\?\: array\<int\>, suppress_filters\?\: bool, attachment_id\?\: int, author\?\: int\|string, author_name\?\: string, \.\.\.\}\|null, array\{post_type\: ''attachment'', post_status\: ''inherit'', posts_per_page\: \-1, fields\: ''ids'', meta_query\: array\{array\{key\: ''wpmf_folder'', value\: int, compare\: ''\=''\}\}, post_mime_type\: array\{''image/jpeg'', ''image/png'', ''image/gif'', ''image/webp'', ''image/avif''\}\} given\.$#'
+			identifier: argument.type
+			count: 1
+			path: includes/class-wp-media-folder.php
+
+		-
+			message: '#^Unreachable statement \- code above always terminates\.$#'
+			identifier: deadCode.unreachable
+			count: 2
+			path: includes/class-wp-media-folder.php
+
+		-
+			message: '#^Call to function is_string\(\) with string will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: includes/options-page.php
+
+		-
+			message: '#^Parameter \#1 \$text of function esc_attr expects string, int given\.$#'
+			identifier: argument.type
+			count: 1
+			path: includes/options-page.php
+
+		-
+			message: '#^Parameter \#3 \$args of function register_setting expects array\{type\?\: string, label\?\: string, description\?\: string, sanitize_callback\?\: callable\(\)\: mixed, show_in_rest\?\: array\|bool, default\?\: mixed\}, ''auto_alt_text…'' given\.$#'
+			identifier: argument.type
+			count: 4
+			path: includes/options-page.php
+
+		-
+			message: '#^Action callback returns int\|false but should not return anything\.$#'
+			identifier: return.void
+			count: 1
+			path: wp-auto-alt-text.php
