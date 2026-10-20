@@ -69,31 +69,84 @@ class Auto_Alt_Text_OpenAI_Fixtures_Test extends WP_UnitTestCase {
 			array(
 				'status'  => 200,
 				'headers' => array(
-					'authorization'       => 'Bearer sk-proj-ABCDEFGHIJKLMNOP',
-					'openai-organization' => 'org-secret',
-					'x-request-id'        => 'req_123',
-					'content-type'        => 'application/json',
+					'Authorization'              => 'Bearer sk-proj-ABCDEFGHIJKLMNOP',
+					'OpenAI-Organization'        => 'org-secret',
+					'X-Request-Id'               => 'req_123',
+					'Set-Cookie'                 => 'a=b',
+					'Content-Type'               => 'application/json',
+					'Retry-After'                => '20',
+					'X-RateLimit-Reset-Tokens'   => '6m0s',
+					'x-unknown-header'           => 'drop me',
 				),
 				'body'    => array(
 					'id'     => 'resp_abc123',
+					'error'  => array( 'message' => 'Incorrect key sk-proj-****lq0A for org-AbC123 in proj_Xyz9 by user-Q1w2' ),
 					'output' => array(
 						array(
 							'id'   => 'msg_x',
 							'text' => 'leaked sk-proj-ABCDEFGHIJKLMNOP here',
 						),
+						array( 'id' => 'rs_abc' ),
 					),
 				),
 			)
 		);
 
-		$this->assertArrayNotHasKey( 'authorization', $redacted['headers'] );
-		$this->assertArrayNotHasKey( 'openai-organization', $redacted['headers'] );
-		$this->assertArrayNotHasKey( 'x-request-id', $redacted['headers'] );
-		$this->assertSame( 'application/json', $redacted['headers']['content-type'] );
+		$this->assertSame(
+			array( 'Content-Type', 'Retry-After', 'X-RateLimit-Reset-Tokens' ),
+			array_keys( $redacted['headers'] )
+		);
 		$this->assertSame( 'resp_redacted', $redacted['body']['id'] );
 		$this->assertSame( 'msg_redacted', $redacted['body']['output'][0]['id'] );
+		$this->assertSame( 'rs_redacted', $redacted['body']['output'][1]['id'] );
 		$this->assertStringContainsString( 'sk-redacted', $redacted['body']['output'][0]['text'] );
-		$this->assertStringNotContainsString( 'ABCDEFGHIJKLMNOP', wp_json_encode( $redacted ) );
+		$this->assertSame(
+			'Incorrect key sk-redacted for org-redacted in proj_redacted by user-redacted',
+			$redacted['body']['error']['message']
+		);
+		$json = wp_json_encode( $redacted );
+		foreach ( array( 'ABCDEFGHIJKLMNOP', 'lq0A', 'AbC123', 'Xyz9', 'Q1w2', 'org-secret' ) as $secret ) {
+			$this->assertStringNotContainsString( $secret, $json );
+		}
+	}
+
+	public function test_redaction_filters_a_models_list_to_openai_models() {
+		$redacted = aat_redact_openai_fixture(
+			array(
+				'status' => 200,
+				'body'   => array(
+					'object' => 'list',
+					'data'   => array(
+						array( 'id' => 'gpt-6.1-sol', 'owned_by' => 'system' ),
+						array( 'id' => 'whisper-1', 'owned_by' => 'openai-internal' ),
+						array( 'id' => 'custom', 'owned_by' => 'org-AbC123' ),
+						array( 'id' => 'ft:gpt:acme', 'owned_by' => 'system' ),
+					),
+				),
+			)
+		);
+		$this->assertSame( array( 'gpt-6.1-sol', 'whisper-1' ), array_column( $redacted['body']['data'], 'id' ) );
+	}
+
+	public function test_validation_accepts_good_and_rejects_bad_recordings() {
+		$ok = array( 'status' => 404, 'body' => array( 'error' => array() ) );
+		$this->assertNull( aat_validate_recorded_fixture( 'model-not-found', $ok ) );
+
+		$this->assertStringContainsString( '429', (string) aat_validate_recorded_fixture( 'models-list', array( 'status' => 429, 'body' => array( 'error' => array() ) ) ) );
+		$this->assertNotNull( aat_validate_recorded_fixture( 'models-list', array( 'status' => 200, 'body' => '<html>Cloudflare</html>' ) ) );
+
+		$incomplete = array(
+			'status' => 200,
+			'body'   => array( 'status' => 'incomplete', 'incomplete_details' => array( 'reason' => 'content_filter' ) ),
+		);
+		$this->assertNotNull( aat_validate_recorded_fixture( 'responses-incomplete-max-tokens', $incomplete ) );
+		$incomplete['body']['incomplete_details']['reason'] = 'max_output_tokens';
+		$this->assertNull( aat_validate_recorded_fixture( 'responses-incomplete-max-tokens', $incomplete ) );
+
+		$completed = array( 'status' => 200, 'body' => array( 'status' => 'completed', 'output' => array( array( 'content' => array( array( 'type' => 'refusal' ) ) ) ) ) );
+		$this->assertNotNull( aat_validate_recorded_fixture( 'responses-completed', $completed ) );
+		$completed['body']['output'][0]['content'][0]['type'] = 'output_text';
+		$this->assertNull( aat_validate_recorded_fixture( 'responses-completed', $completed ) );
 	}
 
 	public function test_every_synthetic_fixture_is_marked() {

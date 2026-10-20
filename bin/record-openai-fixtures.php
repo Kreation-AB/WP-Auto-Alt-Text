@@ -2,8 +2,10 @@
 /**
  * Records real OpenAI responses as test fixtures (tests/fixtures/openai).
  *
- * Usage: OPENAI_API_KEY=sk-... php bin/record-openai-fixtures.php
- *        (or: composer fixtures:record). AAT_RECORD_MODEL overrides the model.
+ * Usage (keeps the key out of shell history):
+ *   read -rs OPENAI_API_KEY; export OPENAI_API_KEY; composer fixtures:record; unset OPENAI_API_KEY
+ * AAT_RECORD_MODEL overrides the model.
+ * Nothing is written unless all six recordings pass validation.
  *
  * Plain PHP with curl, no WordPress. The key is read from the environment and
  * is never printed or written. Every recording passes through
@@ -13,6 +15,9 @@
 if ( PHP_SAPI !== 'cli' ) {
 	exit( 1 );
 }
+
+// Keep arguments (and so the key) out of exception stack traces.
+ini_set( 'zend.exception_ignore_args', '1' );
 
 $key = getenv( 'OPENAI_API_KEY' );
 if ( ! is_string( $key ) || '' === trim( $key ) ) {
@@ -40,13 +45,14 @@ if ( ! is_string( $model_id ) || '' === $model_id ) {
 }
 $model = Auto_Alt_Text_Models::get( $model_id );
 if ( null === $model ) {
-	// An override outside the registry: send no reasoning field, price at zero.
+	// An override outside the registry: send no reasoning field, no known price.
 	$model = array(
 		'id'                => $model_id,
 		'input_price'       => 0.0,
 		'output_price'      => 0.0,
 		'effort'            => null,
 		'max_output_tokens' => 1500,
+		'unpriced'          => true,
 	);
 }
 
@@ -59,6 +65,10 @@ $base = 'https://api.openai.com';
 function aat_record_request( $method, $url, $bearer, $payload = null ) {
 	$headers = array( 'Authorization: Bearer ' . $bearer );
 	$ch      = curl_init( $url );
+	if ( false === $ch ) {
+		fwrite( STDERR, "Could not initialise curl.\n" );
+		exit( 1 );
+	}
 	if ( 'POST' === $method ) {
 		$headers[] = 'Content-Type: application/json';
 		curl_setopt( $ch, CURLOPT_POST, true );
@@ -107,7 +117,7 @@ $responses_payload = function ( $max_output_tokens ) use ( $model, $image ) {
 				'role'    => 'user',
 				'content' => array(
 					array( 'type' => 'input_text', 'text' => 'Describe this image in one short sentence.' ),
-					array( 'type' => 'input_image', 'image_url' => $image ),
+					array( 'type' => 'input_image', 'image_url' => $image, 'detail' => 'auto' ),
 				),
 			),
 		),
@@ -131,18 +141,43 @@ $recordings = array(
 );
 
 $total_cost = 0.0;
+$results    = array();
+$failed     = false;
 foreach ( $recordings as $name => $spec ) {
 	list( $method, $path, $bearer, $payload ) = $spec;
-	$fixture                = aat_record_request( $method, $base . $path, $bearer, $payload );
-	$usage                  = is_array( $fixture['body'] ) ? ( $fixture['body']['usage'] ?? array() ) : array();
-	$total_cost            += ( (int) ( $usage['input_tokens'] ?? 0 ) * $model['input_price'] + (int) ( $usage['output_tokens'] ?? 0 ) * $model['output_price'] ) / 1000000;
+	$fixture                 = aat_record_request( $method, $base . $path, $bearer, $payload );
+	$usage                   = is_array( $fixture['body'] ) ? ( $fixture['body']['usage'] ?? array() ) : array();
+	$total_cost             += ( (int) ( $usage['input_tokens'] ?? 0 ) * $model['input_price'] + (int) ( $usage['output_tokens'] ?? 0 ) * $model['output_price'] ) / 1000000;
 	$fixture['_recorded_at'] = gmdate( 'Y-m-d' );
 	$fixture['_model']       = $model['id'];
 	$fixture                 = aat_redact_openai_fixture( $fixture );
 
+	$error = aat_validate_recorded_fixture( $name, $fixture );
+	if ( null !== $error ) {
+		// Status only: never print the body.
+		fwrite( STDERR, 'Recording ' . $name . ' failed (HTTP ' . $fixture['status'] . '): ' . $error . "\n" );
+		$failed = true;
+		continue;
+	}
+	$results[ $name ] = $fixture;
+}
+
+if ( $failed ) {
+	fwrite( STDERR, "No fixture was written.\n" );
+	exit( 1 );
+}
+
+foreach ( $results as $name => $fixture ) {
 	$file = $dir . '/' . $name . '.json';
-	file_put_contents( $file, json_encode( $fixture, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) . "\n" );
+	if ( false === file_put_contents( $file, json_encode( $fixture, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) . "\n" ) ) {
+		fwrite( STDERR, 'Could not write ' . $file . "\n" );
+		exit( 1 );
+	}
 	echo 'Wrote ' . $file . ' (HTTP ' . $fixture['status'] . ")\n";
 }
 
-printf( "Cost of this run: about USD %.5f (registry prices for %s)\n", $total_cost, $model['id'] );
+if ( ! empty( $model['unpriced'] ) ) {
+	echo 'Cost unknown (no registry price for ' . $model['id'] . ")\n";
+} else {
+	printf( "Cost of this run: about USD %.5f (registry prices for %s)\n", $total_cost, $model['id'] );
+}
