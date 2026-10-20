@@ -28,6 +28,14 @@ class Auto_Alt_Text_Context_Field_Test extends WP_UnitTestCase {
         $post = get_post($id);
         get_post_meta($id);
         wp_attachment_is_image($id);
+        // Theme lookups (stylesheet_root, theme_roots) hit the options table on a cold cache,
+        // which made this test fail when run alone.
+        get_stylesheet();
+        get_template();
+        get_theme_root();
+        get_stylesheet_directory();
+        get_template_directory();
+        get_theme_roots();
 
         // Run only the plugin's field callback and record every SQL statement.
         $queries = [];

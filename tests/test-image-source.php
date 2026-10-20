@@ -234,6 +234,9 @@ class Auto_Alt_Text_Image_Source_Test extends WP_UnitTestCase {
     }
 
     public function test_avif_sources_are_sent_as_webp_never_jpeg() {
+        if (!wp_image_editor_supports(['mime_type' => 'image/avif'])) {
+            $this->markTestSkipped('AVIF needs WordPress 6.5+ with editor support');
+        }
         // AVIF can carry an alpha channel; JPEG would turn it black.
         foreach (['avif-transparent.avif', 'avif-lossy.avif'] as $file) {
             $id = $this->upload($file);

@@ -2,6 +2,12 @@
 class Auto_Alt_Text_Request_Overhead_Test extends WP_UnitTestCase {
     public function setUp(): void {
         parent::setUp();
+        // A schema-upgrade test whose DDL ran inside the lock commits the lock row implicitly, so it
+        // can outlive that test's rollback. Clear it, as the schema-upgrade tests do in setUp.
+        global $wpdb;
+        $wpdb->delete($wpdb->options, ['option_name' => 'aat_schema_upgrade_lock']);
+        wp_cache_delete('aat_schema_upgrade_lock', 'options');
+        wp_cache_delete('notoptions', 'options');
         Auto_Alt_Text_Activator::activate();
         Auto_Alt_Text_Activator::reset_schema_verified();
     }

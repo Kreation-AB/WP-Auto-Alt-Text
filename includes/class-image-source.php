@@ -213,6 +213,9 @@ class Auto_Alt_Text_Image_Source {
                         $this->temp_files[] = $saved['path'];
                     }
                     if (in_array($saved['mime-type'], self::API_MIMES, true) && file_exists($saved['path'])) {
+                        if ($editor instanceof WP_Image_Editor_Imagick && !self::strip_metadata($saved['path'])) {
+                            return new WP_Error('image_metadata_failed', __('The image could not be prepared. Please try again.', 'WP-Auto-Alt-Text'));
+                        }
                         $this->image_url = self::data_url($saved['path'], $saved['mime-type']);
                         return true;
                     }
@@ -226,6 +229,25 @@ class Auto_Alt_Text_Image_Source {
             return true;
         }
         return new WP_Error('unsupported_image', __('Bildformatet stöds inte.', 'WP-Auto-Alt-Text'));
+    }
+
+    /**
+     * Imagick only: core's editor keeps EXIF (incl. GPS) even on resize, so the temp copy is
+     * rewritten without the EXIF, XMP, IPTC and 8BIM profiles. The ICC profile stays. GD never writes EXIF.
+     */
+    private static function strip_metadata($path) {
+        try {
+            $image = new Imagick($path);
+            foreach (['exif', 'xmp', 'iptc', '8bim'] as $name) {
+                $image->profileImage($name, null);
+            }
+            $image->setImageCompressionQuality(self::QUALITY);
+            $written = $image->writeImage($path);
+            $image->clear();
+            return $written;
+        } catch (\ImagickException $e) {
+            return false;
+        }
     }
 
     /** WebP keeps transparency and stays small; PNG when the loaded editor cannot write WebP; JPEG otherwise. */
