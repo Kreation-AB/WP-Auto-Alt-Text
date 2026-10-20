@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<ruleset name="WP Auto Alt Text security and compatibility">
+	<description>Security and PHP compatibility sniffs only. No formatting sniffs.</description>
+
+	<arg name="basepath" value="."/>
+	<arg name="extensions" value="php"/>
+	<arg name="colors"/>
+	<config name="ignore_warnings_on_exit" value="1"/>
+
+	<file>wp-auto-alt-text.php</file>
+	<file>includes</file>
+	<file>admin</file>
+	<file>eval</file>
+
+	<exclude-pattern>*/vendor/*</exclude-pattern>
+	<exclude-pattern>*/.wp-core/*</exclude-pattern>
+	<exclude-pattern>*/node_modules/*</exclude-pattern>
+	<exclude-pattern>*/tests/*</exclude-pattern>
+
+	<!-- Security -->
+	<rule ref="WordPress.Security">
+		<exclude-pattern>*/eval/*</exclude-pattern>
+	</rule>
+	<rule ref="WordPress.DB.PreparedSQL">
+		<exclude-pattern>*/eval/*</exclude-pattern>
+	</rule>
+	<rule ref="WordPress.DB.PreparedSQLPlaceholders">
+		<exclude-pattern>*/eval/*</exclude-pattern>
+	</rule>
+
+	<!-- Internationalisation -->
+	<rule ref="WordPress.WP.I18n">
+		<exclude-pattern>*/eval/*</exclude-pattern>
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="WP-Auto-Alt-Text"/>
+			</property>
+		</properties>
+	</rule>
+
+	<!-- Risky PHP -->
+	<rule ref="WordPress.PHP.DevelopmentFunctions">
+		<exclude-pattern>*/eval/*</exclude-pattern>
+	</rule>
+	<rule ref="WordPress.PHP.DontExtract">
+		<exclude-pattern>*/eval/*</exclude-pattern>
+	</rule>
+	<rule ref="WordPress.PHP.RestrictedPHPFunctions">
+		<exclude-pattern>*/eval/*</exclude-pattern>
+	</rule>
+	<rule ref="WordPress.WP.AlternativeFunctions">
+		<type>warning</type>
+		<exclude-pattern>*/eval/*</exclude-pattern>
+	</rule>
+
+	<!-- Compatibility (all files, including eval/) -->
+	<config name="testVersion" value="8.0-"/>
+	<rule ref="PHPCompatibilityWP"/>
+</ruleset>
