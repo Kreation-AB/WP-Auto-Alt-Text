@@ -48,11 +48,13 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 # 1. WordPress.
 mkdir -p "$WP_CORE_DIR"
 if [ -f "$WP_CORE_DIR/wp-includes/version.php" ]; then
-	echo "WordPress already present in $WP_CORE_DIR, replacing it with $WP_VERSION."
+	echo "WordPress already present in $WP_CORE_DIR, replacing wp-admin and wp-includes with $WP_VERSION (wp-content is kept)."
 fi
 download "https://wordpress.org/wordpress-$WP_VERSION.tar.gz" "$TMP_DIR/wordpress.tar.gz"
 tar -xzf "$TMP_DIR/wordpress.tar.gz" -C "$TMP_DIR"
 [ -d "$TMP_DIR/wordpress" ] || die "Unexpected WordPress archive layout."
+# Remove the old core directories first so files dropped by the new version do not linger.
+rm -rf "$WP_CORE_DIR/wp-admin" "$WP_CORE_DIR/wp-includes"
 cp -R "$TMP_DIR/wordpress/." "$WP_CORE_DIR/"
 
 # 2. WooCommerce.
