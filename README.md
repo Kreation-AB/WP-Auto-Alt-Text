@@ -192,14 +192,26 @@ Product images are queued in two ways only: when a product (or a variation) is s
 
 ## Running tests
 
-Requirements: PHP 8.0+, Composer, WP-CLI, and a MySQL user that can create databases.
+Requirements: PHP 8.0+, Composer, `curl`, `unzip`, and a MySQL user that can create databases.
 
 1. `composer install`
-2. `wp core download --version=7.1.1 --path=.wp-core`
-3. Optional, enables the WooCommerce tests:
-   `curl -sSL https://downloads.wordpress.org/plugin/woocommerce.11.2.1.zip -o .wp-core/woocommerce.zip && unzip -q -o .wp-core/woocommerce.zip -d .wp-core/wp-content/plugins/ && rm .wp-core/woocommerce.zip`
-4. `cp tests/wp-tests-config.php.dist tests/wp-tests-config.php` and set the DB credentials. Use a dedicated database (default `wp_aat_tests`) — the suite drops its tables.
-5. `composer test`
+2. Install WordPress and WooCommerce and write the tests config. Use a dedicated database (default `wp_aat_tests`): the suite drops its tables.
+
+   ```
+   WP_VERSION=7.1.1 WC_VERSION=11.2.1 bin/install-wp-tests.sh
+   ```
+
+   | Variable | Default | Meaning |
+   |---|---|---|
+   | `WP_VERSION` | required | WordPress version to download |
+   | `WC_VERSION` | required | WooCommerce version, or `none` |
+   | `WP_CORE_DIR` | `.wp-core` | Where WordPress is installed |
+   | `TESTS_CONFIG` | `tests/wp-tests-config.php` | Config file to write |
+   | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` | `wp_aat_tests`, `root`, empty, `localhost` | Database settings |
+   | `FORCE` | unset | `1` overwrites an existing config |
+
+   An existing config is never overwritten without `FORCE=1`. To use a config elsewhere, set `WP_PHPUNIT__TESTS_CONFIG` to its path.
+3. `composer test`
 
 ## Contributing
 

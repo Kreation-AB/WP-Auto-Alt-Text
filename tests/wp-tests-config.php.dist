@@ -2,9 +2,10 @@
 /*
  * Test-suite configuration template for wp-phpunit.
  *
- * Copy this file to `wp-tests-config.php` (same directory) and adjust the
- * DB_* constants for your local environment. `wp-tests-config.php` is
- * git-ignored because it's machine-specific — do not commit it.
+ * `bin/install-wp-tests.sh` writes `wp-tests-config.php` from this file (ABSPATH
+ * and the DB_* constants are substituted). You can also copy it by hand and
+ * adjust those. `wp-tests-config.php` is git-ignored because it's
+ * machine-specific — do not commit it.
  */
 
 define( 'ABSPATH', dirname( __DIR__ ) . '/.wp-core/' );

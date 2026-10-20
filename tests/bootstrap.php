@@ -7,10 +7,10 @@ $_tests_dir = getenv( 'WP_PHPUNIT__DIR' ) ?: dirname( __DIR__ ) . '/vendor/wp-ph
 
 require_once $_tests_dir . '/includes/functions.php';
 
-// WooCommerce is optional: set WC_PLUGIN_FILE, or unzip it into .wp-core/wp-content/plugins/.
-$_wc_plugin_file = getenv( 'WC_PLUGIN_FILE' ) ?: dirname( __DIR__ ) . '/.wp-core/wp-content/plugins/woocommerce/woocommerce.php';
-
-tests_add_filter( 'muplugins_loaded', function () use ( $_wc_plugin_file ) {
+tests_add_filter( 'muplugins_loaded', function () {
+	// WooCommerce is optional: set WC_PLUGIN_FILE, or install it next to the
+	// core in ABSPATH (bin/install-wp-tests.sh does this).
+	$_wc_plugin_file = getenv( 'WC_PLUGIN_FILE' ) ?: ABSPATH . 'wp-content/plugins/woocommerce/woocommerce.php';
 	if ( file_exists( $_wc_plugin_file ) ) {
 		require $_wc_plugin_file;
 	}
