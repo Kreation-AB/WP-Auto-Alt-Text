@@ -154,8 +154,11 @@ foreach ( $recordings as $name => $spec ) {
 
 	$error = aat_validate_recorded_fixture( $name, $fixture );
 	if ( null !== $error ) {
-		// Status only: never print the body.
-		fwrite( STDERR, 'Recording ' . $name . ' failed (HTTP ' . $fixture['status'] . '): ' . $error . "\n" );
+		// Never print the body; only OpenAI's error code and message, with anything key-like masked.
+		$api_error = is_array( $fixture['body'] ) && is_array( $fixture['body']['error'] ?? null ) ? $fixture['body']['error'] : array();
+		$detail    = trim( ( is_string( $api_error['code'] ?? null ) ? $api_error['code'] . ': ' : '' ) . ( is_string( $api_error['message'] ?? null ) ? $api_error['message'] : '' ) );
+		$detail    = '' === $detail ? '' : ' (OpenAI: ' . substr( (string) preg_replace( '/sk-\S+/', '[key]', $detail ), 0, 300 ) . ')';
+		fwrite( STDERR, 'Recording ' . $name . ' failed (HTTP ' . $fixture['status'] . '): ' . $error . $detail . "\n" );
 		$failed = true;
 		continue;
 	}
