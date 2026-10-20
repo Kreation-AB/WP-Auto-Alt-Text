@@ -1,0 +1,70 @@
+const { test, expect } = require( '@playwright/test' );
+const { RequestUtils } = require( '@wordpress/e2e-test-utils-playwright' );
+const { wpCli, getOption, restoreOption } = require( '../utils/wp-cli' );
+
+// Inside the wp-env tests container the plugin's tests/ directory is mapped here.
+const SAMPLE_IN_CONTAINER = '/var/www/html/wp-content/aat-e2e-tests/e2e/assets/sample.jpg';
+const PRODUCT_NAME = 'Sandlåda Robust 350 L';
+
+// wp post meta get exits non-zero while the meta is missing; that reads as empty.
+function altOf( id ) {
+	try {
+		return wpCli( [ 'post', 'meta', 'get', String( id ), '_wp_attachment_image_alt' ] );
+	} catch ( e ) {
+		return '';
+	}
+}
+
+test.describe( 'WooCommerce product save', () => {
+	let requestUtils;
+	let savedNaming;
+	let productId;
+	let attachmentId;
+
+	test.beforeAll( async ( { baseURL } ) => {
+		requestUtils = await RequestUtils.setup( {
+			baseURL,
+			storageStatePath: 'artifacts/storage-states/admin.json',
+		} );
+		savedNaming = getOption( 'auto_alt_text_naming' );
+		wpCli( [ 'option', 'update', 'auto_alt_text_naming', 'product' ] );
+	} );
+
+	test.afterEach( async () => {
+		if ( productId ) {
+			await requestUtils.rest( { method: 'DELETE', path: `/wc/v3/products/${ productId }`, params: { force: true } } );
+		}
+		if ( attachmentId ) {
+			await requestUtils.rest( { method: 'DELETE', path: `/wp/v2/media/${ attachmentId }`, params: { force: true } } );
+		}
+		productId = undefined;
+		attachmentId = undefined;
+	} );
+
+	test.afterAll( async () => {
+		restoreOption( 'auto_alt_text_naming', savedNaming );
+	} );
+
+	test( 'a product save queues its image and the queue writes alt text naming the product', async ( { page } ) => {
+		attachmentId = Number( wpCli( [ 'media', 'import', SAMPLE_IN_CONTAINER, '--porcelain' ] ) );
+		const product = await requestUtils.rest( {
+			method: 'POST',
+			path: '/wc/v3/products',
+			data: { name: PRODUCT_NAME, images: [ { id: attachmentId } ] },
+		} );
+		productId = product.id;
+
+		await page.goto( `/wp-admin/post.php?post=${ productId }&action=edit` );
+		await page.locator( '#publish' ).click();
+		await expect( page.locator( '#message.updated, .notice-success' ).first() ).toBeVisible();
+
+		// Earlier upload jobs may sit ahead in the queue, so tick a bounded number of times.
+		let alt = '';
+		for ( let i = 0; i < 10 && ! alt; i++ ) {
+			wpCli( [ 'cron', 'event', 'run', 'aat_queue_tick' ] );
+			alt = altOf( attachmentId );
+		}
+
+		expect( alt ).toContain( PRODUCT_NAME );
+	} );
+} );
