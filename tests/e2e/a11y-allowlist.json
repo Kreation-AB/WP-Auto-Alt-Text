@@ -1,0 +1,37 @@
+[
+	{
+		"page": "settings",
+		"rule": "color-contrast",
+		"target": "label[for=\"aat_brand_name\"]",
+		"issue": "#24",
+		"note": "The brand-name row label has too little text contrast on the settings background."
+	},
+	{
+		"page": "settings",
+		"rule": "color-contrast",
+		"target": "label[for=\"aat_brand_description\"]",
+		"issue": "#24",
+		"note": "The brand-description row label has too little text contrast on the settings background."
+	},
+	{
+		"page": "settings",
+		"rule": "color-contrast",
+		"target": ".aat-brand-description-row > td > .description",
+		"issue": "#24",
+		"note": "The brand-description help text has too little contrast."
+	},
+	{
+		"page": "settings",
+		"rule": "label",
+		"target": "#enable_feedback",
+		"issue": "#24",
+		"note": "The feedback checkbox has no accessible name."
+	},
+	{
+		"page": "settings",
+		"rule": "select-name",
+		"target": "select[name=\"language\"]",
+		"issue": "#24",
+		"note": "The language select has no accessible name."
+	}
+]
