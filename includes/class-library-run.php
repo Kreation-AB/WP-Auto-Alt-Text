@@ -17,7 +17,9 @@ class Auto_Alt_Text_Library_Run {
     private const START_LOCK_SECONDS = 30;
     private const MAX_FAILURES = 500;
     private const FEED_CHUNK = 200;
-    private const FEED_PENDING_CAP_FACTOR = 5;
+    private const DEFAULT_FEED_WINDOW = 20;
+    /** feed() adds nothing while the run has this many windows pending, rows in backoff included. */
+    public const FEED_PENDING_CAP_FACTOR = 5;
     private const FEED_BUDGET_SECONDS = 10.0;
     private const UNSUPPORTED_MESSAGE = 'Bildformatet stöds inte.';
 
@@ -160,10 +162,21 @@ class Auto_Alt_Text_Library_Run {
         if (null === $run || !in_array($run['status'], [self::STATUS_RUNNING, self::STATUS_PAUSED], true)) {
             return false;
         }
+        $table = Auto_Alt_Text_Queue::get_table_name();
+        if (isset($run['summary']['reopened_from'])) {
+            // A reopened run's pending rows are its retried failures. Deleting
+            // them would drop them from the report: they go back to failed,
+            // with the last_error they still carry, before close() copies them.
+            // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+            $wpdb->query($wpdb->prepare(
+                "UPDATE {$table} SET status = %s, updated_at = %s WHERE run_id = %d AND status = %s",
+                Auto_Alt_Text_Queue::STATUS_FAILED, self::now(), $id, Auto_Alt_Text_Queue::STATUS_PENDING
+            ));
+            // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+        }
         if (!self::close($id, self::STATUS_CANCELLED)) {
             return false;
         }
-        $table = Auto_Alt_Text_Queue::get_table_name();
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and generated %d list only.
         $wpdb->query($wpdb->prepare(
             "DELETE FROM {$table} WHERE run_id = %d AND status = %s",
@@ -252,6 +265,15 @@ class Auto_Alt_Text_Library_Run {
             'pending' => $n(Auto_Alt_Text_Queue::STATUS_PENDING) + $n(Auto_Alt_Text_Queue::STATUS_PROCESSING),
             'done'    => $done,
         ];
+    }
+
+    /**
+     * How many due images a run keeps queued ahead of the runner (filter
+     * aat_library_feed_window). The runner's chain rules use the same window
+     * and FEED_PENDING_CAP_FACTOR, so they can't drift from feed().
+     */
+    public static function feed_window(): int {
+        return max(1, (int) apply_filters('aat_library_feed_window', self::DEFAULT_FEED_WINDOW));
     }
 
     /**

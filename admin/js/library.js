@@ -490,6 +490,8 @@ async function loadMoreFailures() {
 	} finally {
 		setBusy(false);
 		show($('failures-more'), data && data.run ? failuresShown < (data.run.failures_total || 0) : false);
+		// A poll that resolved while this was busy dropped its reschedule: restart polling.
+		schedule();
 	}
 }
 

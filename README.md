@@ -190,7 +190,7 @@ Inspect the queue at any time with `wp auto-alt-text queue` (add `--status=faile
 
 Admin page under Auto Alt Text → Hela biblioteket (`manage_options` only, as are its REST routes and the report download). It generates alt text for every image in the Media Library in one background run, using the same queue as automatic generation. The library is counted in chunks and the counts are cached; the settings page shows a status card with the cached count of images missing alt text and the state of the latest run.
 
-- **Coverage.** "Missing" fills images without alt text. "Missing and unedited AI text" also regenerates alt text the plugin wrote that nobody has edited. Human-written alt text is never touched, and there is no "overwrite everything" option. Unsupported image formats are listed as failures, not retried.
+- **Coverage.** "Missing" fills images without alt text. "Missing and unedited AI text" also regenerates alt text the plugin wrote that nobody has edited. Human-written alt text is never touched, and there is no "overwrite everything" option. Unsupported image formats are counted separately ("kan inte behandlas") and are never queued or charged; an image that only turns out to be unsupported when it is processed is listed as a failure and not retried.
 - **Cost.** The start dialog shows the estimated cost for the chosen model before you confirm, and the page shows the cost so far while the run is going.
 - **Controls.** One run at a time: pause, resume, cancel, and retry the failed images. Uploads made during a run are not held up by it.
 - **Report.** A plain-text download with counts, failures, pauses, versions and the run's warning and error log lines. It never contains the API key, key-like strings or alt texts.

@@ -238,6 +238,32 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
         )));
     }
 
+    public function test_feed_window_applies_the_filter_and_never_drops_below_one() {
+        $this->assertSame(20, Auto_Alt_Text_Library_Run::feed_window());
+        add_filter('aat_library_feed_window', fn() => 7);
+        $this->assertSame(7, Auto_Alt_Text_Library_Run::feed_window());
+        add_filter('aat_library_feed_window', fn() => 0, 20);
+        $this->assertSame(1, Auto_Alt_Text_Library_Run::feed_window());
+    }
+
+    public function test_cancelling_a_reopened_run_keeps_its_retried_failures_in_the_report() {
+        global $wpdb;
+        $id = $this->start()['id'];
+        $this->queue_row($id, 'failed', 'Boom');
+        $this->queue_row($id, 'failed', 'Timeout');
+        Auto_Alt_Text_Library_Run::finalize($id, Auto_Alt_Text_Library_Run::STATUS_FINISHED);
+        $this->assertSame(2, Auto_Alt_Text_Library_Run::retry_failed($id));
+
+        $this->assertTrue(Auto_Alt_Text_Library_Run::cancel($id));
+        $run = Auto_Alt_Text_Library_Run::get($id);
+        $this->assertSame('cancelled', $run['status']);
+        $this->assertSame(2, $run['summary']['failed']);
+        $this->assertSame(['Boom', 'Timeout'], wp_list_pluck($run['summary']['failures'], 'reason'));
+        $this->assertSame(2, (int) $wpdb->get_var($wpdb->prepare(
+            'SELECT COUNT(*) FROM ' . Auto_Alt_Text_Queue::get_table_name() . ' WHERE run_id = %d AND status = %s', $id, 'failed'
+        )));
+    }
+
     public function test_finalize_twice_fires_once_and_keeps_failures() {
         global $wpdb;
         $id = $this->start()['id'];

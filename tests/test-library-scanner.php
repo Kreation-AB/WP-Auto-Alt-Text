@@ -148,6 +148,13 @@ class Auto_Alt_Text_Library_Scanner_Test extends WP_UnitTestCase {
         $this->assertSame(1, $found);
     }
 
+    public function test_deactivation_clears_a_scheduled_recount() {
+        Auto_Alt_Text_Library_Scanner::request_recount();
+        $this->assertNotFalse(wp_next_scheduled('aat_library_recount'));
+        do_action('deactivate_' . plugin_basename(dirname(__DIR__) . '/wp-auto-alt-text.php'));
+        $this->assertFalse(wp_next_scheduled('aat_library_recount'));
+    }
+
     public function test_cached_counts_default_to_zero_and_incomplete() {
         $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
         $this->assertFalse($counts['complete']);

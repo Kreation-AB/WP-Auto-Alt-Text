@@ -178,8 +178,7 @@ class Auto_Alt_Text_Library_Runner {
         if (null === $run || $run['fed_all']) {
             return false;
         }
-        $window = max(1, (int) apply_filters('aat_library_feed_window', 20));
-        return $run_pending < 5 * $window;
+        return $run_pending < Auto_Alt_Text_Library_Run::FEED_PENDING_CAP_FACTOR * Auto_Alt_Text_Library_Run::feed_window();
     }
 
     /** Waits 1-20 s (and no longer than the remaining budget) until a claimable job is due. */

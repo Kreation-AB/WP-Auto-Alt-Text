@@ -193,7 +193,11 @@ class Auto_Alt_Text_REST_API {
         return [$items, $failed_total];
     }
 
-    /** The last 8 processed rows, newest first. Excerpts are for the page only, never the report. */
+    /**
+     * The 8 newest processed rows by id (close to processing order; sorting by
+     * updated_at would sort every processed row on each poll). Excerpts are for
+     * the page only, never the report.
+     */
     private function library_recent(int $run_id): array {
         global $wpdb;
         $table = Auto_Alt_Text_Queue::get_table_name();
@@ -204,7 +208,7 @@ class Auto_Alt_Text_REST_API {
         ];
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Internal table name.
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT attachment_id, status, last_error FROM {$table} WHERE run_id = %d AND status IN (%s, %s, %s) ORDER BY updated_at DESC, id DESC LIMIT 8",
+            "SELECT attachment_id, status, last_error FROM {$table} WHERE run_id = %d AND status IN (%s, %s, %s) ORDER BY id DESC LIMIT 8",
             $run_id, Auto_Alt_Text_Queue::STATUS_DONE, Auto_Alt_Text_Queue::STATUS_SKIPPED, Auto_Alt_Text_Queue::STATUS_FAILED
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared

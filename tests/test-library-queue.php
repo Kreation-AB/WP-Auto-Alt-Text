@@ -9,7 +9,7 @@ class Auto_Alt_Text_Library_Queue_Test extends WP_UnitTestCase {
         Auto_Alt_Text_Activator::activate();
         global $wpdb;
         $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Activator::get_runs_table_name());
-        $wpdb->query('TRUNCATE TABLE ' . Auto_Alt_Text_Queue::get_table_name());
+        $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Queue::get_table_name());
         $wpdb->query("DELETE FROM {$wpdb->prefix}auto_alt_text_stats");
         delete_option(Auto_Alt_Text_Quota_Monitor::OPTION);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);

@@ -223,7 +223,7 @@ class Auto_Alt_Text_Queue {
     public function run(?float $time_budget = null, ?callable $after_batch = null): int {
         $run = Auto_Alt_Text_Library_Run::active();
         if (null !== $run) {
-            Auto_Alt_Text_Library_Run::feed((int) apply_filters('aat_library_feed_window', 20));
+            Auto_Alt_Text_Library_Run::feed(Auto_Alt_Text_Library_Run::feed_window());
         }
         $this->after_batch = $after_batch;
         $deadline = null !== $time_budget ? microtime(true) + $time_budget : null;

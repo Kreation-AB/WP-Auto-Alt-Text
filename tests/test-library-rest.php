@@ -42,11 +42,20 @@ class Auto_Alt_Text_Library_Rest_Test extends WP_UnitTestCase {
     }
 
     public function test_library_routes_require_manage_options() {
+        $routes = [
+            ['GET', ''], ['POST', '/start'], ['POST', '/pause'], ['POST', '/resume'],
+            ['POST', '/cancel'], ['POST', '/retry-failed'], ['POST', '/recount'],
+        ];
+        $registered = array_filter(array_keys(rest_get_server()->get_routes()), static fn($route) => 0 === strpos($route, self::BASE));
+        $this->assertCount(count($routes), $registered, 'Every library route is listed here');
+
         wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
-        $this->assertSame(403, $this->call('GET', '')->get_status());
-        $this->assertSame(403, $this->start()->get_status());
-        $this->assertSame(403, $this->call('POST', '/pause')->get_status());
-        $this->assertSame(403, $this->call('POST', '/recount')->get_status());
+        foreach ($routes as [$method, $path]) {
+            $params = '/start' === $path ? ['coverage' => 'missing'] : [];
+            $this->assertSame(403, $this->call($method, $path, $params)->get_status(), "$method library$path");
+        }
+        $this->assertNull(Auto_Alt_Text_Library_Run::latest());
+        $this->assertFalse(wp_next_scheduled(Auto_Alt_Text_Library_Scanner::RECOUNT_HOOK));
     }
 
     public function test_get_returns_counts_estimate_and_null_run() {
@@ -152,6 +161,17 @@ class Auto_Alt_Text_Library_Rest_Test extends WP_UnitTestCase {
         $this->assertSame(basename(get_attached_file($id)), $by['filled']['file']);
         $this->assertArrayNotHasKey('excerpt', $by['failed']);
         $this->assertStringNotContainsString('sk-abcdefgh', $by['failed']['reason']);
+    }
+
+    public function test_recent_lists_the_newest_rows_first_by_id() {
+        $run = $this->start()->get_data()['run'];
+        $older = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
+        $newer = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
+        // The older row was touched later; the order stays by id, which needs no sort over every processed row.
+        $this->queue_row($run['id'], $older, 'failed', ['last_error' => 'older', 'updated_at' => gmdate('Y-m-d H:i:s', time() + 60)]);
+        $this->queue_row($run['id'], $newer, 'failed', ['last_error' => 'newer']);
+        $recent = $this->call('GET', '')->get_data()['run']['recent'];
+        $this->assertSame(['newer', 'older'], array_column($recent, 'reason'));
     }
 
     public function test_active_run_failures_come_from_the_queue_and_page() {

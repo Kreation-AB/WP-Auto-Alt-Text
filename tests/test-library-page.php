@@ -107,13 +107,31 @@ class Auto_Alt_Text_Library_Page_Test extends WP_UnitTestCase {
         $running = $this->output([Auto_Alt_Text_Library_Page::class, 'render_status_card']);
         $this->assertStringContainsString('Körning pågår: 0 av 10 bilder klara', $running);
         $this->assertStringNotContainsString('Senaste körningen', $running);
+        $this->assertStringNotContainsString('Bilder som saknar alt-text', $running);
 
         Auto_Alt_Text_Library_Run::finalize((int) $run['id'], Auto_Alt_Text_Library_Run::STATUS_FINISHED);
         $finished = $this->output([Auto_Alt_Text_Library_Page::class, 'render_status_card']);
         remove_filter('query', $spy);
         $this->assertStringContainsString('Senaste körningen är klar', $finished);
         $this->assertStringNotContainsString('pågår', $finished);
+        // The cached count stays visible under the outcome.
+        $this->assertStringContainsString('Bilder som saknar alt-text: 10', $finished);
+        $this->assertLessThan(strpos($finished, 'Bilder som saknar alt-text'), strpos($finished, 'Senaste körningen är klar'));
         $this->assertSame(0, $posts_selects, 'The card must not run SELECTs over the posts table');
+    }
+
+    public function test_status_card_schedules_the_first_count_when_there_is_none() {
+        delete_option('aat_library_counts');
+        wp_unschedule_hook(Auto_Alt_Text_Library_Scanner::RECOUNT_HOOK);
+        $html = $this->output([Auto_Alt_Text_Library_Page::class, 'render_status_card']);
+        $this->assertNotFalse(wp_next_scheduled(Auto_Alt_Text_Library_Scanner::RECOUNT_HOOK));
+        $this->assertStringContainsString('Biblioteket räknas…', $html);
+    }
+
+    public function test_skipped_note_covers_every_cause() {
+        $this->finished_run([], 0);
+        $html = $this->output([Auto_Alt_Text_Library_Page::class, 'render']);
+        $this->assertStringContainsString('(hade redan fått alt-text eller togs bort under körningen)', $html);
     }
 
     private function finished_run(array $failures, int $failed): array {

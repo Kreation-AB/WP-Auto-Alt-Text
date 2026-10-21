@@ -163,7 +163,7 @@ class Auto_Alt_Text_Library_Page {
                 'sum_filled' => __('Fyllda', 'WP-Auto-Alt-Text'),
                 'sum_failed' => __('Misslyckade', 'WP-Auto-Alt-Text'),
                 'sum_skipped' => __('Hoppade över', 'WP-Auto-Alt-Text'),
-                'sum_skipped_note' => __('en person hann skriva alt-text under tiden', 'WP-Auto-Alt-Text'),
+                'sum_skipped_note' => __('hade redan fått alt-text eller togs bort under körningen', 'WP-Auto-Alt-Text'),
                 'sum_cost' => __('Kostnad', 'WP-Auto-Alt-Text'),
                 // translators: %s is the number of failed images.
                 'failures_heading' => __('Misslyckade bilder (%s)', 'WP-Auto-Alt-Text'),
@@ -225,45 +225,51 @@ class Auto_Alt_Text_Library_Page {
     public static function render_status_card(): void {
         $s = self::strings();
         $run = Auto_Alt_Text_Library_Run::active() ?? Auto_Alt_Text_Library_Run::latest();
-        if (null === $run) {
-            $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
-            if (!$counts['complete'] && !$counts['recounting']) {
-                // Only schedules a single event; nothing is counted here.
-                Auto_Alt_Text_Library_Scanner::request_recount();
-                $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
-            }
-            if ($counts['complete']) {
-                $text = sprintf($s['card_missing'], self::fmt_int($counts['missing']))
-                    . ' (' . sprintf($s['card_updated'], self::age_text($counts['updated_at'])) . ')';
-            } elseif ($counts['recounting']) {
-                $text = $s['card_counting'];
-            } else {
-                $text = $s['card_not_counted'];
-            }
-        } else {
+        $lines = [];
+        if (null !== $run && self::is_active_run($run)) {
             $progress = Auto_Alt_Text_Library_Run::progress($run);
-            $done = self::fmt_int($progress['done']);
-            $total = self::fmt_int($progress['total']);
-            if (self::is_active_run($run)) {
-                $state = Auto_Alt_Text_Library_Run::display_state($run);
-                $running = 'running' === $state['state'];
-                $text = sprintf($running ? $s['card_running'] : $s['card_paused'], $done, $total);
-                $reason = self::reason_text($state['state']);
-                if ('' !== $reason) {
-                    $text .= ' ' . $reason;
-                }
-            } else {
-                $key = Auto_Alt_Text_Library_Run::STATUS_FINISHED === $run['status'] ? 'card_finished' : 'card_cancelled';
-                $text = sprintf($s[$key], self::fmt_int($progress['filled']), self::fmt_int($progress['failed']));
+            $state = Auto_Alt_Text_Library_Run::display_state($run);
+            $running = 'running' === $state['state'];
+            $text = sprintf($running ? $s['card_running'] : $s['card_paused'], self::fmt_int($progress['done']), self::fmt_int($progress['total']));
+            $reason = self::reason_text($state['state']);
+            if ('' !== $reason) {
+                $text .= ' ' . $reason;
             }
+            $lines[] = $text;
+        } else {
+            if (null !== $run) {
+                $progress = Auto_Alt_Text_Library_Run::progress($run);
+                $key = Auto_Alt_Text_Library_Run::STATUS_FINISHED === $run['status'] ? 'card_finished' : 'card_cancelled';
+                $lines[] = sprintf($s[$key], self::fmt_int($progress['filled']), self::fmt_int($progress['failed']));
+            }
+            // With nothing running the cached count shows, also under the last run's outcome.
+            $lines[] = self::card_count_text();
         }
         ?>
         <section class="aat-lib-card" aria-labelledby="aat-library-card-title">
             <h2 id="aat-library-card-title"><?php echo esc_html($s['card_title']); ?></h2>
-            <p><?php echo esc_html($text); ?></p>
+            <?php foreach ($lines as $line) : ?>
+                <p><?php echo esc_html($line); ?></p>
+            <?php endforeach; ?>
             <p><a class="button" href="<?php echo esc_url(self::page_url()); ?>"><?php echo esc_html($s['card_link']); ?></a></p>
         </section>
         <?php
+    }
+
+    /** The card's cached count line. Schedules the first count when there is none; never counts here. */
+    private static function card_count_text(): string {
+        $s = self::strings();
+        $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
+        if (!$counts['complete'] && !$counts['recounting']) {
+            // Only schedules a single event; nothing is counted here.
+            Auto_Alt_Text_Library_Scanner::request_recount();
+            $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
+        }
+        if ($counts['complete']) {
+            return sprintf($s['card_missing'], self::fmt_int($counts['missing']))
+                . ' (' . sprintf($s['card_updated'], self::age_text($counts['updated_at'])) . ')';
+        }
+        return $counts['recounting'] ? $s['card_counting'] : $s['card_not_counted'];
     }
 
     /** The page. Server-side first paint; library.js updates the same IDs. */
