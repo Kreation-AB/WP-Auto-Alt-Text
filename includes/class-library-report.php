@@ -43,13 +43,13 @@ class Auto_Alt_Text_Library_Report {
         $lines[] = 'Faktisk kostnad (USD): ' . number_format($actual, 4, '.', '');
         $lines[] = '';
         $lines[] = '== Misslyckade bilder ==';
-        array_push($lines, ...self::failure_lines($run));
+        array_push($lines, ...self::failure_lines($run, (int) $progress['failed'], $final));
         $lines[] = '';
         $lines[] = '== Pauser och återupptagningar ==';
         if (empty($summary['events'])) {
             $lines[] = '(inga)';
         }
-        foreach ($summary['events'] as $event) {
+        foreach ($summary['events'] ?? [] as $event) {
             $lines[] = sprintf('%s UTC  %s  %s', $event['at'] ?? '', $event['type'] ?? '', $event['reason'] ?? '');
         }
         $lines[] = '';
@@ -62,7 +62,7 @@ class Auto_Alt_Text_Library_Report {
             $lines[] = 'WooCommerce: ' . WC_VERSION;
         }
         $lines[] = '';
-        $lines[] = '== Loggrader (fel och varningar, senaste ' . self::LOG_LIMIT . ') ==';
+        $lines[] = '== Loggrader (fel och varningar, senaste ' . self::LOG_LIMIT . '; tider i webbplatsens tid) ==';
         array_push($lines, ...self::log_lines($run_id));
 
         return self::scrub(implode("\n", $lines) . "\n");
@@ -70,8 +70,10 @@ class Auto_Alt_Text_Library_Report {
 
     /** Replaces the saved API key and key/org/project-looking strings. */
     public static function scrub(string $text): string {
-        $key = self::saved_key();
-        if ('' !== $key) {
+        // Longest first, so a key containing another is replaced whole.
+        $keys = self::saved_keys();
+        usort($keys, static fn($a, $b) => strlen($b) <=> strlen($a));
+        foreach ($keys as $key) {
             $text = str_replace($key, '[redacted]', $text);
         }
         $text = preg_replace('/sk-[A-Za-z0-9_-]{8,}/', '[redacted]', $text) ?? '';
@@ -99,45 +101,70 @@ class Auto_Alt_Text_Library_Report {
         if (null === $run) {
             wp_die(esc_html__('Körningen finns inte.', 'WP-Auto-Alt-Text'), '', ['response' => 404]);
         }
+        $payload = self::download_payload($run);
+        // Drop stray output from other code so it cannot end up in the file.
+        while (ob_get_level()) {
+            ob_end_clean();
+        }
+        if (headers_sent()) {
+            wp_die(esc_html__('Rapporten kunde inte skickas.', 'WP-Auto-Alt-Text'), '', ['response' => 500]);
+        }
         nocache_headers();
-        header('Content-Type: text/plain; charset=utf-8');
-        header('Content-Disposition: attachment; filename="' . self::filename($run) . '"');
-        header('X-Content-Type-Options: nosniff');
-        echo self::build($run_id); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Plain-text download, scrubbed in build().
+        foreach ($payload['headers'] as $header) {
+            header($header);
+        }
+        echo $payload['body']; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Plain-text download, scrubbed in build().
         exit;
+    }
+
+    /** @return array{headers: string[], body: string} */
+    public static function download_payload(array $run): array {
+        return [
+            'headers' => [
+                'Content-Type: text/plain; charset=utf-8',
+                'Content-Disposition: attachment; filename="' . self::filename($run) . '"',
+                'X-Content-Type-Options: nosniff',
+            ],
+            'body' => self::build((int) $run['id']),
+        ];
     }
 
     private static function times(string $utc): string {
         return $utc . ' UTC / ' . get_date_from_gmt($utc) . ' (webbplatsens tid)';
     }
 
-    private static function saved_key(): string {
+    /** @return string[] Every configured key (constant and saved option) plus trimmed variants. */
+    private static function saved_keys(): array {
+        $keys = [];
         if (defined('AUTO_ALT_TEXT_OPENAI_API_KEY') && AUTO_ALT_TEXT_OPENAI_API_KEY) {
-            return (string) AUTO_ALT_TEXT_OPENAI_API_KEY;
+            $keys[] = (string) AUTO_ALT_TEXT_OPENAI_API_KEY;
         }
         $encrypted = get_option('auto_alt_text_api_key');
-        if (!$encrypted) {
-            return '';
+        if ($encrypted) {
+            $keys[] = (string) (new Auto_Alt_Text_OpenAI())->decrypt_api_key($encrypted);
         }
-        return (string) (new Auto_Alt_Text_OpenAI())->decrypt_api_key($encrypted);
+        foreach ($keys as $key) {
+            $keys[] = trim($key);
+        }
+        return array_values(array_filter(array_unique($keys), static fn($k) => '' !== $k));
     }
 
     /** @return string[] */
-    private static function failure_lines(array $run): array {
+    private static function failure_lines(array $run, int $failed_total, bool $final): array {
         $summary = $run['summary'];
-        $failures = is_array($summary['failures'] ?? null) ? $summary['failures'] : [];
+        $failures = $final && is_array($summary['failures'] ?? null) ? $summary['failures'] : [];
         $lines = [];
         foreach ($failures as $f) {
             $lines[] = self::failure_line((int) ($f['attachment_id'] ?? 0), (string) ($f['file'] ?? ''), (string) ($f['reason'] ?? ''));
         }
-        if (!empty($summary['failures_truncated'])) {
-            $listed = count($failures);
+        // Active runs have no summary list yet; a final run may have a capped or empty one.
+        if (!$final || !empty($summary['failures_truncated']) || (!$failures && $failed_total > 0)) {
             $extra = self::queue_failures($run['id'], $failures);
             foreach ($extra as $row) {
                 $file = (string) get_post_meta((int) $row->attachment_id, '_wp_attached_file', true);
                 $lines[] = self::failure_line((int) $row->attachment_id, basename($file), (string) $row->last_error);
             }
-            $more = max(0, (int) $summary['failed'] - $listed - count($extra));
+            $more = max(0, $failed_total - count($failures) - count($extra));
             if ($more > 0) {
                 $lines[] = sprintf('… och %d till', $more);
             }
