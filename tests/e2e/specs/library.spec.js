@@ -6,7 +6,17 @@ const { wpCli, getOption, restoreOption, provenance } = require( '../utils/wp-cl
 const SAMPLE = path.resolve( __dirname, '../assets/sample.jpg' );
 const LIBRARY = '/wp-admin/admin.php?page=auto-alt-text-library';
 const LIBRARY_REST = '/wp-auto-alt-text/v1/library';
+const BASELINE_ALT = 'e2e-baseline';
 const FINAL = [ 'finished', 'cancelled' ];
+
+// wp post meta get exits non-zero while the meta is missing; that reads as empty.
+function altOf( id ) {
+	try {
+		return wpCli( [ 'post', 'meta', 'get', String( id ), '_wp_attachment_image_alt' ] );
+	} catch ( e ) {
+		return '';
+	}
+}
 
 test.describe( 'library backfill', () => {
 	// Each wpCli call takes a few seconds and the tests make dozens.
@@ -14,6 +24,7 @@ test.describe( 'library backfill', () => {
 
 	let requestUtils;
 	let ids = [];
+	let baselineIds = [];
 	let savedAutoGenerate;
 
 	// Auto-generate off: uploads must not queue their own jobs, only the run does.
@@ -41,6 +52,14 @@ test.describe( 'library backfill', () => {
 			console.warn( `library spec cleanup: could not cancel the active run: ${ e.message }` );
 		}
 		restoreOption( 'aat_e2e_queue_limits', null );
+		for ( const id of baselineIds ) {
+			try {
+				wpCli( [ 'post', 'meta', 'delete', String( id ), '_wp_attachment_image_alt' ] );
+			} catch ( e ) {
+				console.warn( `library spec cleanup: could not remove the temporary alt text of ${ id }: ${ e.message }` );
+			}
+		}
+		baselineIds = [];
 		for ( const id of ids ) {
 			await requestUtils.rest( { method: 'DELETE', path: `/wp/v2/media/${ id }`, params: { force: true } } );
 		}
@@ -135,7 +154,18 @@ test.describe( 'library backfill', () => {
 	} );
 
 	test( 'cancel keeps written alt texts and stops the run', async ( { page } ) => {
+		// Give every existing image alt text first, so the one image a tick fills is an upload.
+		const existing = wpCli( [ 'post', 'list', '--post_type=attachment', '--post_mime_type=image', '--format=ids' ] )
+			.split( /\s+/ )
+			.filter( Boolean );
+		for ( const id of existing ) {
+			if ( altOf( id ) === '' ) {
+				baselineIds.push( id );
+				wpCli( [ 'post', 'meta', 'update', String( id ), '_wp_attachment_image_alt', BASELINE_ALT ] );
+			}
+		}
 		const missing = await prepare();
+		expect( missing ).toBe( 3 );
 		// The test mu-plugin then feeds and fills one image per tick.
 		wpCli( [ 'option', 'update', 'aat_e2e_queue_limits', '1' ] );
 		await startFromPage( page, missing );
@@ -158,17 +188,16 @@ test.describe( 'library backfill', () => {
 
 		await expect.poll( async () => ( await getState() ).run.display_state ).toBe( 'cancelled' );
 
-		// Exactly the filled images keep their text, recorded as library writes; the rest stay empty.
-		// The filled image may be a baseline one, so the uploads hold zero or one filled image.
-		const filledIds = [];
-		for ( const id of ids ) {
-			const alt = ( await requestUtils.rest( { path: `/wp/v2/media/${ id }` } ) ).alt_text;
-			if ( alt !== '' ) {
-				filledIds.push( id );
-				expect( provenance( id ).source ).toBe( 'library' );
-			}
+		// Feed walks IDs in ascending order: the lowest upload was filled and keeps its text.
+		const sorted = [ ...ids ].sort( ( a, b ) => a - b );
+		const alts = {};
+		for ( const id of sorted ) {
+			alts[ id ] = ( await requestUtils.rest( { path: `/wp/v2/media/${ id }` } ) ).alt_text;
 		}
-		expect( filledIds.length ).toBeLessThanOrEqual( 1 );
+		expect( alts[ sorted[ 0 ] ] ).not.toBe( '' );
+		expect( provenance( sorted[ 0 ] ).source ).toBe( 'library' );
+		expect( alts[ sorted[ 1 ] ] ).toBe( '' );
+		expect( alts[ sorted[ 2 ] ] ).toBe( '' );
 		expect( ( await getState() ).run.progress.filled ).toBe( 1 );
 	} );
 } );
