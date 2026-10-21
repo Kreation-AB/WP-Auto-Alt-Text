@@ -62,7 +62,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 #### Inställningar
 
 - **Inställningen Feedback gäller nu.** Är den avstängd visas inte Förbättra-delen i dialogen, och servern avvisar feedback.
-- **Sparade svar i cachen används inte efter uppdateringen.** Varje bild kan behöva genereras en gång till.
+- **Sparade svar i cachen används inte efter uppdateringen.** Nästa generering av en bild anropar OpenAI även om ett svar fanns sparat; befintliga alt-texter ändras inte.
 - **Modellkontrollen vid sparande körs bara när nyckeln eller modellen har ändrats** (eller när det sparade resultatet är ungefär ett dygn gammalt), med högst 5 sekunders väntan.
 - **Etiketten "Standard" följer filtret `auto_alt_text_model`.**
 
