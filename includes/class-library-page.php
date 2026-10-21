@@ -64,8 +64,19 @@ class Auto_Alt_Text_Library_Page {
         return number_format($usd, $usd < 1 ? 3 : 2, ',', "\u{00A0}");
     }
 
-    private static function minutes_ago(int $timestamp): int {
-        return max(0, (int) floor((time() - $timestamp) / 60));
+    private static function age_text(int $timestamp): string {
+        $s = self::strings();
+        $minutes = max(0, (int) floor((time() - $timestamp) / 60));
+        if ($minutes < 1) {
+            return $s['age_now'];
+        }
+        if ($minutes < 60) {
+            return sprintf($s['age_minutes'], $minutes);
+        }
+        if ($minutes < 1440) {
+            return sprintf($s['age_hours'], intdiv($minutes, 60));
+        }
+        return sprintf($s['age_days'], intdiv($minutes, 1440));
     }
 
     /**
@@ -84,23 +95,31 @@ class Auto_Alt_Text_Library_Page {
                 'count_ai' => __('Skrivna av pluginet, oredigerade', 'WP-Auto-Alt-Text'),
                 'count_human' => __('Skrivna av en person – rörs aldrig', 'WP-Auto-Alt-Text'),
                 'count_unsupported' => __('Bildformat som stöds inte – kan inte behandlas', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
-                'counts_recounting' => __('Räknar om biblioteket… (senast uppdaterat för %d min sedan)', 'WP-Auto-Alt-Text'),
+                'age_now' => __('nyss', 'WP-Auto-Alt-Text'),
+                // translators: %d is a number of minutes.
+                'age_minutes' => __('för %d min sedan', 'WP-Auto-Alt-Text'),
+                // translators: %d is a number of hours.
+                'age_hours' => __('för %d h sedan', 'WP-Auto-Alt-Text'),
+                // translators: %d is a number of days.
+                'age_days' => __('för %d dygn sedan', 'WP-Auto-Alt-Text'),
+                'progress_label' => __('Förlopp', 'WP-Auto-Alt-Text'),
+                'error_session' => __('Sessionen har gått ut – ladda om sidan.', 'WP-Auto-Alt-Text'),
+                'error_active' => __('En körning pågår redan.', 'WP-Auto-Alt-Text'),
+                'retry_note' => __('De misslyckade bilderna kan inte köras om (bildformatet stöds inte, eller uppgifterna har rensats).', 'WP-Auto-Alt-Text'),
+                // translators: %s is how long ago the counts were updated, for example "för 5 min sedan" or "nyss".
+                'counts_recounting' => __('Räknar om biblioteket… (senast uppdaterat %s)', 'WP-Auto-Alt-Text'),
                 'counts_first' => __('Räknar biblioteket…', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
-                'counts_updated' => __('Senast uppdaterat för %d min sedan.', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
-                'coverage_label' => __('Skriv även om pluginets egna, oredigerade alt-texter (%s)', 'WP-Auto-Alt-Text'),
+                // translators: %s is how long ago the counts were updated, for example "för 5 min sedan" or "nyss".
+                'counts_updated' => __('Senast uppdaterat %s.', 'WP-Auto-Alt-Text'),
+                // translators: %s is the number of unedited alt texts written by the plugin.
+                'coverage_label' => __('Skriv om även pluginets egna, oredigerade alt-texter (%s)', 'WP-Auto-Alt-Text'),
                 'coverage_help' => __('Alt-texter som en person har skrivit eller ändrat rörs aldrig.', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$s is the number of images, %2$s the estimated cost in USD.
                 'estimate' => __('Antal bilder att behandla: %1$s. Uppskattad kostnad: ca %2$s USD.', 'WP-Auto-Alt-Text'),
                 'estimate_none' => __('Det finns inga bilder att behandla.', 'WP-Auto-Alt-Text'),
                 'start' => __('Starta…', 'WP-Auto-Alt-Text'),
                 'new_run_heading' => __('Starta en ny körning', 'WP-Auto-Alt-Text'),
-                'start_heading' => __('Starta en körning', 'WP-Auto-Alt-Text'),
                 'dialog_start_title' => __('Starta körningen?', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
-                'dialog_start_body' => __('Antal bilder att behandla: %1$s. Uppskattad kostnad: ca %2$s USD.', 'WP-Auto-Alt-Text'),
                 'dialog_background' => __('Körningen fortsätter i bakgrunden även om du stänger fliken.', 'WP-Auto-Alt-Text'),
                 'dialog_dismiss' => __('Avbryt', 'WP-Auto-Alt-Text'),
                 'dialog_confirm' => __('Starta', 'WP-Auto-Alt-Text'),
@@ -110,23 +129,23 @@ class Auto_Alt_Text_Library_Page {
                 'cancel_dialog_confirm' => __('Ja, avbryt körningen', 'WP-Auto-Alt-Text'),
                 'active_heading' => __('Körning pågår', 'WP-Auto-Alt-Text'),
                 'paused_heading' => __('Körningen är pausad', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$s is images done, %2$s the total number of images.
                 'progress_text' => __('%1$s av %2$s bilder klara', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$s is images done, %2$s the total, read out by screen readers.
                 'progress_value' => __('%1$s av %2$s', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %s is a clock time (HH:MM) in the site time zone.
                 'waiting' => __('Väntar på nytt försök kl %s', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %s is a duration such as "ca 12 min".
                 'eta' => __('Uppskattad tid kvar: %s', 'WP-Auto-Alt-Text'),
                 'eta_calculating' => __('Uppskattad tid kvar: beräknas…', 'WP-Auto-Alt-Text'),
                 'eta_less_than_minute' => __('mindre än 1 min', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %d is a number of minutes.
                 'eta_minutes' => __('ca %d min', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$d is hours, %2$d is minutes.
                 'eta_hours' => __('ca %1$d h %2$d min', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %s is the number of failed images.
                 'failed_so_far' => __('Misslyckade hittills: %s', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$s is the cost so far in USD, %2$s the estimated total in USD.
                 'cost_so_far' => __('Kostnad hittills: %1$s USD av uppskattade %2$s USD', 'WP-Auto-Alt-Text'),
                 'recent_heading' => __('Senaste resultat', 'WP-Auto-Alt-Text'),
                 'recent_none' => __('Inga resultat ännu.', 'WP-Auto-Alt-Text'),
@@ -136,7 +155,7 @@ class Auto_Alt_Text_Library_Page {
                 'pause' => __('Pausa', 'WP-Auto-Alt-Text'),
                 'resume' => __('Fortsätt', 'WP-Auto-Alt-Text'),
                 'cancel' => __('Avbryt', 'WP-Auto-Alt-Text'),
-                'paused_user' => __('Pausad av dig.', 'WP-Auto-Alt-Text'),
+                'paused_user' => __('Pausad manuellt.', 'WP-Auto-Alt-Text'),
                 'paused_quota' => __('Pausad: OpenAI-kvoten eller betalningen räcker inte. Körningen fortsätter automatiskt när det fungerar igen.', 'WP-Auto-Alt-Text'),
                 'paused_auth' => __('Pausad: OpenAI avvisade API-nyckeln. Kontrollera nyckeln under Inställningar.', 'WP-Auto-Alt-Text'),
                 'final_finished' => __('Körningen är klar', 'WP-Auto-Alt-Text'),
@@ -146,7 +165,7 @@ class Auto_Alt_Text_Library_Page {
                 'sum_skipped' => __('Hoppade över', 'WP-Auto-Alt-Text'),
                 'sum_skipped_note' => __('en person hann skriva alt-text under tiden', 'WP-Auto-Alt-Text'),
                 'sum_cost' => __('Kostnad', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %s is the number of failed images.
                 'failures_heading' => __('Misslyckade bilder (%s)', 'WP-Auto-Alt-Text'),
                 'failures_col_file' => __('Fil', 'WP-Auto-Alt-Text'),
                 'failures_col_reason' => __('Orsak', 'WP-Auto-Alt-Text'),
@@ -155,7 +174,7 @@ class Auto_Alt_Text_Library_Page {
                 'retry' => __('Försök igen med de misslyckade', 'WP-Auto-Alt-Text'),
                 'report' => __('Ladda ner rapport', 'WP-Auto-Alt-Text'),
                 'report_hint' => __('Rapporten innehåller inga nycklar och inga alt-texter, så du kan skicka den till din webbyrå.', 'WP-Auto-Alt-Text'),
-                'warning_stalled' => __('Körningen har inte gått framåt på över 10 minuter. Webbplatsen kan inte starta bakgrundsjobb själv – be din webbhotell aktivera WP-Cron eller lägga in ett riktigt cron-jobb.', 'WP-Auto-Alt-Text'),
+                'warning_stalled' => __('Körningen har inte gått framåt på över 10 minuter. Webbplatsen kan inte starta bakgrundsjobb själv – be ditt webbhotell att aktivera WP-Cron eller lägga in ett riktigt cron-jobb.', 'WP-Auto-Alt-Text'),
                 'warning_cron' => __('WP-Cron är avstängt (DISABLE_WP_CRON). Körningen behöver ett system-cron som anropar wp-cron.php.', 'WP-Auto-Alt-Text'),
                 'error_generic' => __('Något gick fel. Försök igen.', 'WP-Auto-Alt-Text'),
                 'error_poll' => __('Kunde inte hämta status just nu. Försöker igen.', 'WP-Auto-Alt-Text'),
@@ -164,22 +183,22 @@ class Auto_Alt_Text_Library_Page {
                 'live_running' => __('Körningen pågår.', 'WP-Auto-Alt-Text'),
                 'live_finished' => __('Körningen är klar.', 'WP-Auto-Alt-Text'),
                 'live_cancelled' => __('Körningen avbröts.', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$s is images done, %2$s the total number of images.
                 'live_progress' => __('%1$s av %2$s bilder klara.', 'WP-Auto-Alt-Text'),
                 'card_title' => __('Hela biblioteket', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %s is the number of images without alt text.
                 'card_missing' => __('Bilder som saknar alt-text: %s', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
-                'card_updated' => __('uppdaterat för %d min sedan', 'WP-Auto-Alt-Text'),
+                // translators: %s is how long ago the count was updated, for example "för 5 min sedan".
+                'card_updated' => __('uppdaterat %s', 'WP-Auto-Alt-Text'),
                 'card_counting' => __('Biblioteket räknas…', 'WP-Auto-Alt-Text'),
                 'card_not_counted' => __('Öppna Hela biblioteket för att se hur många bilder som saknar alt-text.', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$s is images done, %2$s the total number of images.
                 'card_running' => __('Körning pågår: %1$s av %2$s bilder klara.', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$s is images done, %2$s the total number of images.
                 'card_paused' => __('Körningen är pausad: %1$s av %2$s bilder klara.', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$s is the number of filled images, %2$s the number of failed ones.
                 'card_finished' => __('Senaste körningen är klar: %1$s fyllda, %2$s misslyckade.', 'WP-Auto-Alt-Text'),
-                // translators: placeholders are numbers (counts, minutes, USD) or a clock time.
+                // translators: %1$s is the number of filled images, %2$s the number of failed ones.
                 'card_cancelled' => __('Senaste körningen avbröts: %1$s fyllda, %2$s misslyckade.', 'WP-Auto-Alt-Text'),
                 'card_link' => __('Öppna Hela biblioteket', 'WP-Auto-Alt-Text'),
             ];
@@ -207,9 +226,14 @@ class Auto_Alt_Text_Library_Page {
         $run = Auto_Alt_Text_Library_Run::active() ?? Auto_Alt_Text_Library_Run::latest();
         if (null === $run) {
             $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
+            if (!$counts['complete'] && !$counts['recounting']) {
+                // Only schedules a single event; nothing is counted here.
+                Auto_Alt_Text_Library_Scanner::request_recount();
+                $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
+            }
             if ($counts['complete']) {
                 $text = sprintf($s['card_missing'], self::fmt_int($counts['missing']))
-                    . ' (' . sprintf($s['card_updated'], self::minutes_ago($counts['updated_at'])) . ')';
+                    . ' (' . sprintf($s['card_updated'], self::age_text($counts['updated_at'])) . ')';
             } elseif ($counts['recounting']) {
                 $text = $s['card_counting'];
             } else {
@@ -272,11 +296,11 @@ class Auto_Alt_Text_Library_Page {
         };
 
         if ($counts['recounting'] && $counts['complete']) {
-            $count_status = sprintf($s['counts_recounting'], self::minutes_ago($counts['updated_at']));
+            $count_status = sprintf($s['counts_recounting'], self::age_text($counts['updated_at']));
         } elseif (!$counts['complete']) {
             $count_status = $s['counts_first'];
         } else {
-            $count_status = sprintf($s['counts_updated'], self::minutes_ago($counts['updated_at']));
+            $count_status = sprintf($s['counts_updated'], self::age_text($counts['updated_at']));
         }
 
         $done = $progress ? $progress['done'] : 0;
@@ -290,13 +314,21 @@ class Auto_Alt_Text_Library_Page {
         if ($final && is_array($run['summary']['failures'] ?? null)) {
             $failures = array_slice($run['summary']['failures'], 0, self::FAILURES_PAGE);
         }
+        $retryable = false;
+        foreach ($failures as $failure) {
+            if (false === stripos((string) ($failure['reason'] ?? ''), 'stöds inte')) {
+                $retryable = true;
+            }
+        }
+        $failed_count = $progress ? (int) $progress['failed'] : 0;
         $failures_total = $progress ? max((int) $progress['failed'], count($failures)) : 0;
+        $can_retry = $failed_count > 0 && ($retryable || count($failures) < $failures_total);
         ?>
         <div class="wrap aat-library" id="aat-library">
             <h1><?php echo esc_html($s['title']); ?></h1>
             <p class="aat-lib-intro"><?php echo esc_html($s['intro']); ?></p>
 
-            <div id="aat-library-warning" class="aat-lib-warning"<?php $hidden(!$health['stalled'] || null !== $waiting); ?>>
+            <div id="aat-library-warning" class="aat-lib-warning" role="status"<?php $hidden(!$health['stalled'] || null !== $waiting); ?>>
                 <p id="aat-library-warning-stalled"><?php echo esc_html($s['warning_stalled']); ?></p>
                 <p id="aat-library-warning-cron"<?php $hidden(!$health['cron_disabled']); ?>><?php echo esc_html($s['warning_cron']); ?></p>
             </div>
@@ -307,7 +339,7 @@ class Auto_Alt_Text_Library_Page {
                 <p id="aat-library-pause-reason" class="aat-lib-note"<?php $hidden(!$paused); ?>><?php echo esc_html($state ? self::reason_text($state['state']) : ''); ?></p>
                 <p id="aat-library-progress-text" class="aat-lib-progress-text"><?php echo esc_html(sprintf($s['progress_text'], self::fmt_int($done), self::fmt_int($total))); ?></p>
                 <div id="aat-library-progress" class="aat-lib-bar" role="progressbar"
-                    aria-labelledby="aat-library-progress-text"
+                    aria-label="<?php echo esc_attr($s['progress_label']); ?>"
                     aria-valuemin="0" aria-valuemax="<?php echo esc_attr((string) $total); ?>" aria-valuenow="<?php echo esc_attr((string) $done); ?>"
                     aria-valuetext="<?php echo esc_attr(sprintf($s['progress_value'], self::fmt_int($done), self::fmt_int($total))); ?>">
                     <div class="aat-lib-bar-fill" id="aat-library-progress-fill" style="width:<?php echo esc_attr((string) $pct); ?>%"></div>
@@ -352,7 +384,15 @@ class Auto_Alt_Text_Library_Page {
                     </table>
                     <p><button type="button" class="button" id="aat-library-failures-more"<?php $hidden(count($failures) >= $failures_total); ?>><?php echo esc_html($s['failures_more']); ?></button></p>
                 </div>
-                <p><button type="button" class="button button-primary" id="aat-library-retry"<?php $hidden(!$progress || 0 === (int) $progress['failed']); ?>><?php echo esc_html($s['retry']); ?></button></p>
+                <p><button type="button" class="button button-primary" id="aat-library-retry"<?php $hidden(!$can_retry); ?>><?php echo esc_html($s['retry']); ?></button></p>
+                <p id="aat-library-retry-note" class="aat-lib-note"<?php $hidden($failed_count < 1 || $can_retry); ?>><?php echo esc_html($s['retry_note']); ?></p>
+            </section>
+
+            <section id="aat-library-report-section" class="aat-lib-section"<?php $hidden(null === $run); ?>>
+                <p>
+                    <a id="aat-library-report" class="button" href="<?php echo esc_url($run ? wp_specialchars_decode(wp_nonce_url(admin_url('admin-post.php?action=aat_library_report&run=' . (int) $run['id']), 'aat_library_report')) : '#'); ?>"><?php echo esc_html($s['report']); ?></a>
+                    <span class="aat-lib-note"><?php echo esc_html($s['report_hint']); ?></span>
+                </p>
             </section>
 
             <section id="aat-library-before" class="aat-lib-section" aria-labelledby="aat-library-before-title"<?php $hidden($active); ?>>
@@ -369,15 +409,8 @@ class Auto_Alt_Text_Library_Page {
                     <label for="aat-library-coverage" id="aat-library-coverage-label"><?php echo esc_html(sprintf($s['coverage_label'], self::fmt_int($counts['ai']))); ?></label><br>
                     <span id="aat-library-coverage-help" class="aat-lib-note"><?php echo esc_html($s['coverage_help']); ?></span>
                 </p>
-                <p id="aat-library-estimate" data-per-image="<?php echo esc_attr((string) $per_image); ?>"><?php echo esc_html($estimate_text); ?></p>
+                <p id="aat-library-estimate"><?php echo esc_html($estimate_text); ?></p>
                 <p><button type="button" class="button button-primary" id="aat-library-start" aria-describedby="aat-library-estimate"<?php echo disabled(!$counts['complete'] || $candidates < 1, true, false); ?>><?php echo esc_html($s['start']); ?></button></p>
-            </section>
-
-            <section id="aat-library-report-section" class="aat-lib-section"<?php $hidden(null === $run); ?>>
-                <p>
-                    <a id="aat-library-report" class="button" href="<?php echo esc_url($run ? wp_specialchars_decode(wp_nonce_url(admin_url('admin-post.php?action=aat_library_report&run=' . (int) $run['id']), 'aat_library_report')) : '#'); ?>"><?php echo esc_html($s['report']); ?></a>
-                    <span class="aat-lib-note"><?php echo esc_html($s['report_hint']); ?></span>
-                </p>
             </section>
 
             <p id="aat-library-live" class="screen-reader-text" aria-live="polite" aria-atomic="true"></p>

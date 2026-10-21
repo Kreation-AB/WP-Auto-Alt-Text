@@ -77,17 +77,53 @@ class Auto_Alt_Text_Library_Page_Test extends WP_UnitTestCase {
         add_filter('query', $spy);
 
         $none = $this->output([Auto_Alt_Text_Library_Page::class, 'render_status_card']);
-        $this->assertStringContainsString('saknar alt-text', $none);
+        $this->assertStringContainsString('Bilder som saknar alt-text: 10', $none);
+        $this->assertStringNotContainsString('pågår', $none);
         $this->assertStringContainsString('page=auto-alt-text-library', $none);
 
         $run = Auto_Alt_Text_Library_Run::start('missing', get_current_user_id());
         $running = $this->output([Auto_Alt_Text_Library_Page::class, 'render_status_card']);
-        $this->assertStringContainsString('pågår', $running);
+        $this->assertStringContainsString('Körning pågår: 0 av 10 bilder klara', $running);
+        $this->assertStringNotContainsString('Senaste körningen', $running);
 
         Auto_Alt_Text_Library_Run::finalize((int) $run['id'], Auto_Alt_Text_Library_Run::STATUS_FINISHED);
         $finished = $this->output([Auto_Alt_Text_Library_Page::class, 'render_status_card']);
         remove_filter('query', $spy);
-        $this->assertStringContainsString('klar', $finished);
+        $this->assertStringContainsString('Senaste körningen är klar', $finished);
+        $this->assertStringNotContainsString('pågår', $finished);
         $this->assertSame(0, $posts_selects, 'The card must not run SELECTs over the posts table');
+    }
+
+    private function finished_run(array $failures, int $failed): array {
+        global $wpdb;
+        $run = Auto_Alt_Text_Library_Run::start('missing', get_current_user_id());
+        Auto_Alt_Text_Library_Run::finalize((int) $run['id'], Auto_Alt_Text_Library_Run::STATUS_FINISHED);
+        $summary = Auto_Alt_Text_Library_Run::get((int) $run['id'])['summary'];
+        $summary['filled'] = 6;
+        $summary['failed'] = $failed;
+        $summary['failures'] = $failures;
+        $wpdb->update(Auto_Alt_Text_Activator::get_runs_table_name(), ['summary' => wp_json_encode($summary)], ['id' => $run['id']]);
+        return $run;
+    }
+
+    public function test_render_after_a_final_run_shows_summary_failures_retry_and_new_run() {
+        $this->finished_run([['attachment_id' => 5, 'file' => 'broken.jpg', 'reason' => 'Timeout hos OpenAI']], 1);
+        $html = $this->output([Auto_Alt_Text_Library_Page::class, 'render']);
+        $this->assertStringContainsString('Körningen är klar', $html);
+        $this->assertStringContainsString('id="aat-library-sum-filled">6<', $html);
+        $this->assertStringContainsString('broken.jpg', $html);
+        $this->assertStringContainsString('Timeout hos OpenAI', $html);
+        $this->assertMatchesRegularExpression('/id="aat-library-retry"(?![^>]*hidden)/', $html);
+        $this->assertMatchesRegularExpression('/id="aat-library-report-section"(?![^>]*hidden)/', $html);
+        $this->assertStringContainsString('Starta en ny körning', $html);
+        $this->assertMatchesRegularExpression('/id="aat-library-before"(?![^>]*hidden)/', $html);
+        $this->assertLessThan(strpos($html, 'id="aat-library-before"'), strpos($html, 'id="aat-library-report-section"'));
+    }
+
+    public function test_retry_is_hidden_when_every_failure_is_an_unsupported_format() {
+        $this->finished_run([['attachment_id' => 5, 'file' => 'a.tiff', 'reason' => 'Bildformatet stöds inte.']], 1);
+        $html = $this->output([Auto_Alt_Text_Library_Page::class, 'render']);
+        $this->assertMatchesRegularExpression('/id="aat-library-retry"[^>]* hidden/', $html);
+        $this->assertMatchesRegularExpression('/id="aat-library-retry-note"(?![^>]*hidden)/', $html);
     }
 }

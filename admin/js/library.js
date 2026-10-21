@@ -24,6 +24,12 @@ let samplesRun = null;
 let dialogTrigger = null;
 let suppressRefocus = false;
 let lastError = '';
+let seq = 0;
+let stopped = false;
+let ready = false;
+let failuresKey = '';
+let recentKey = '';
+let retryable = false;
 const clockSkew = (Number(cfg.now) || Date.now() / 1000) - Date.now() / 1000;
 
 function sprintf(template, ...args) {
@@ -55,9 +61,20 @@ function show(el, visible) {
 	}
 }
 
-function minutesAgo(timestamp) {
+/** "nyss", then minutes up to 59, hours up to 23, then days. */
+function ageText(timestamp) {
 	const now = Date.now() / 1000 + clockSkew;
-	return Math.max(0, Math.floor((now - timestamp) / 60));
+	const minutes = Math.max(0, Math.floor((now - timestamp) / 60));
+	if (minutes < 1) {
+		return t.age_now;
+	}
+	if (minutes < 60) {
+		return sprintf(t.age_minutes, minutes);
+	}
+	if (minutes < 1440) {
+		return sprintf(t.age_hours, Math.floor(minutes / 60));
+	}
+	return sprintf(t.age_days, Math.floor(minutes / 1440));
 }
 
 /** "YYYY-MM-DD HH:MM:SS" (UTC) as HH:MM in the site's time zone. */
@@ -89,6 +106,12 @@ async function api(method, path, body, query) {
 	if (!response.ok) {
 		const error = new Error('HTTP ' + response.status);
 		error.status = response.status;
+		try {
+			const payload = await response.json();
+			error.restMessage = payload && typeof payload.message === 'string' ? payload.message : '';
+		} catch (ignore) {
+			error.restMessage = '';
+		}
 		throw error;
 	}
 	return response.json();
@@ -114,6 +137,9 @@ function runState(run) {
 }
 
 function needsPolling(payload) {
+	if (stopped) {
+		return false;
+	}
 	if (!payload) {
 		return true;
 	}
@@ -136,9 +162,9 @@ function renderCounts(counts) {
 	if (!counts.complete) {
 		status = t.counts_first;
 	} else if (counts.recounting) {
-		status = sprintf(t.counts_recounting, minutesAgo(counts.updated_at));
+		status = sprintf(t.counts_recounting, ageText(counts.updated_at));
 	} else {
-		status = sprintf(t.counts_updated, minutesAgo(counts.updated_at));
+		status = sprintf(t.counts_updated, ageText(counts.updated_at));
 	}
 	setText($('count-status'), status);
 	setText($('coverage-label'), sprintf(t.coverage_label, fmtInt(counts.ai)));
@@ -147,11 +173,11 @@ function renderCounts(counts) {
 
 function renderEstimate(counts) {
 	const n = candidateCount(counts);
-	const perImage = Number(cfg.estimatePerImage) || 0;
+	const perImage = Number(data && data.estimate_per_image_usd !== undefined ? data.estimate_per_image_usd : cfg.estimatePerImage) || 0;
 	const text = n > 0 ? sprintf(t.estimate, fmtInt(n), fmtUsd(n * perImage)) : t.estimate_none;
 	setText($('estimate'), text);
 	setText($('dialog-summary'), text);
-	$('start').disabled = !counts.complete || n < 1;
+	$('start').disabled = !ready || !counts.complete || n < 1;
 }
 
 function etaText(run, progress) {
@@ -185,6 +211,11 @@ function outcomeLabel(outcome) {
 }
 
 function renderRecent(items) {
+	const key = JSON.stringify(items);
+	if (key === recentKey) {
+		return;
+	}
+	recentKey = key;
 	const list = $('recent');
 	list.replaceChildren();
 	if (!items.length) {
@@ -229,18 +260,30 @@ function appendFailures(items) {
 		body.appendChild(tr);
 	});
 	failuresShown += items.length;
+	items.forEach((item) => {
+		if (!/stöds inte/i.test(item.reason || '')) {
+			retryable = true;
+		}
+	});
 }
 
 function renderFailures(run) {
 	const total = run.failures_total || 0;
 	show($('failures'), total > 0);
 	setText($('failures-title'), sprintf(t.failures_heading, fmtInt(total)));
-	if (run.failures_offset === 0) {
+	// Rebuild only when the list can have changed, so polling keeps paging, focus and reading position.
+	const key = run.id + ':' + run.status + ':' + total;
+	if (run.failures_offset === 0 && key !== failuresKey) {
+		failuresKey = key;
 		$('failures-body').replaceChildren();
 		failuresShown = 0;
+		retryable = false;
 		appendFailures(run.failures_page || []);
 	}
 	show($('failures-more'), failuresShown < total);
+	const canRetry = (run.progress.failed > 0) && (retryable || failuresShown < total);
+	show($('retry'), canRetry);
+	show($('retry-note'), run.progress.failed > 0 && !canRetry);
 }
 
 function renderWarning(payload, waiting) {
@@ -269,6 +312,7 @@ function announce(text, force) {
 
 function render(payload) {
 	data = payload;
+	ready = true;
 	const { counts, run } = payload;
 	const mode = runState(run);
 
@@ -318,7 +362,6 @@ function render(payload) {
 			setText($('sum-failed'), fmtInt(progress.failed));
 			setText($('sum-skipped'), fmtInt(progress.skipped));
 			setText($('sum-cost'), fmtUsd(run.cost_so_far) + ' USD');
-			show($('retry'), progress.failed > 0);
 			renderFailures(run);
 		}
 	}
@@ -349,13 +392,41 @@ function schedule() {
 	}
 }
 
+function sessionExpired(error) {
+	if (error.status === 401 || error.status === 403) {
+		stopped = true;
+		clearTimeout(timer);
+		showError(t.error_session);
+		return true;
+	}
+	return false;
+}
+
+function setBusy(flag) {
+	busy = flag;
+	['dialog-confirm', 'cancel-dialog-confirm', 'failures-more', 'retry', 'pause', 'resume', 'cancel'].forEach((id) => {
+		$(id).disabled = flag;
+	});
+}
+
 async function refresh() {
+	if (busy || stopped) {
+		return;
+	}
+	const mine = ++seq;
 	try {
-		render(await api('GET', ''));
+		const payload = await api('GET', '');
+		if (mine !== seq || busy) {
+			return;
+		}
+		render(payload);
 		if (lastError === t.error_poll) {
 			showError('');
 		}
 	} catch (error) {
+		if (mine !== seq || sessionExpired(error)) {
+			return;
+		}
 		showError(t.error_poll);
 	}
 	schedule();
@@ -365,32 +436,41 @@ function poll() {
 	if (document.hidden) {
 		return;
 	}
+	if (busy) {
+		schedule();
+		return;
+	}
 	refresh();
 }
 
 async function act(path, body) {
-	if (busy) {
+	if (busy || stopped) {
 		return false;
 	}
-	busy = true;
+	seq++;
+	setBusy(true);
 	try {
 		render(await api('POST', path, body));
 		showError('');
-		schedule();
 		return true;
 	} catch (error) {
-		if (error.status === 409) {
-			await refresh();
-		} else {
-			showError(t.error_generic);
+		if (!sessionExpired(error)) {
+			showError(error.status === 409 ? t.error_active : error.restMessage || t.error_generic);
 		}
 		return false;
 	} finally {
-		busy = false;
+		setBusy(false);
+		if (!stopped) {
+			refresh();
+		}
 	}
 }
 
 async function loadMoreFailures() {
+	if (busy || stopped) {
+		return;
+	}
+	setBusy(true);
 	try {
 		const payload = await api('GET', '', null, 'failures_offset=' + failuresShown);
 		const run = payload.run;
@@ -399,7 +479,12 @@ async function loadMoreFailures() {
 			show($('failures-more'), failuresShown < (run.failures_total || 0));
 		}
 	} catch (error) {
-		showError(t.error_generic);
+		if (!sessionExpired(error)) {
+			showError(error.restMessage || t.error_generic);
+		}
+	} finally {
+		setBusy(false);
+		show($('failures-more'), data && data.run ? failuresShown < (data.run.failures_total || 0) : false);
 	}
 }
 
@@ -422,8 +507,12 @@ function closeDialog(dialog, refocus) {
 
 function bindDialog(dialog) {
 	dialog.addEventListener('close', () => {
-		if (!suppressRefocus && dialogTrigger && !dialogTrigger.hidden) {
-			dialogTrigger.focus();
+		if (!suppressRefocus && dialogTrigger) {
+			if (dialogTrigger.closest('[hidden]')) {
+				moveFocusToSection();
+			} else {
+				dialogTrigger.focus();
+			}
 		}
 		suppressRefocus = false;
 	});
@@ -503,6 +592,7 @@ function init() {
 		}
 	});
 
+	$('start').disabled = true;
 	refresh();
 }
 
