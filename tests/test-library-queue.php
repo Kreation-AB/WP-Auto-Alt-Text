@@ -253,4 +253,194 @@ class Auto_Alt_Text_Library_Queue_Test extends WP_UnitTestCase {
         )));
         $this->assertNull(Auto_Alt_Text_Run_Context::current());
     }
+
+    private function age_rows(int $days): void {
+        global $wpdb;
+        $wpdb->query($wpdb->prepare(
+            'UPDATE ' . Auto_Alt_Text_Queue::get_table_name() . ' SET updated_at = %s',
+            gmdate('Y-m-d H:i:s', time() - $days * DAY_IN_SECONDS)
+        ));
+    }
+
+    private function run_row_count(int $run_id): int {
+        global $wpdb;
+        return (int) $wpdb->get_var($wpdb->prepare(
+            'SELECT COUNT(*) FROM ' . Auto_Alt_Text_Queue::get_table_name() . ' WHERE run_id = %d', $run_id
+        ));
+    }
+
+    public function test_retrying_a_cancelled_run_never_feeds_the_cancelled_remainder() {
+        $ids = [];
+        for ($i = 0; $i < 12; $i++) {
+            $ids[] = $this->image();
+        }
+        $run = $this->start(12);
+        add_filter('aat_library_feed_window', fn() => 3);
+        $failing = new Auto_Alt_Text_Queue(function (int $id): array {
+            $this->calls[] = $id;
+            return ['status' => 'failed', 'error' => 'Boom'];
+        });
+        $failing->run();
+        $this->assertSame(3, count($this->calls));
+        Auto_Alt_Text_Library_Run::cancel($run['id']);
+        $this->assertSame(3, Auto_Alt_Text_Library_Run::retry_failed($run['id']));
+
+        $this->calls = [];
+        for ($i = 0; $i < 6; $i++) {
+            $this->queue()->run();
+        }
+        $this->assertSame(array_slice($ids, 0, 3), $this->calls);
+        $done = Auto_Alt_Text_Library_Run::get($run['id']);
+        $this->assertSame('cancelled', $done['status']);
+        $this->assertSame(3, $done['summary']['filled']);
+        $this->assertSame(0, $done['summary']['skipped']);
+        $this->assertSame(3, $this->run_row_count($run['id']));
+    }
+
+    public function test_rows_in_backoff_do_not_take_up_the_feed_window() {
+        global $wpdb;
+        for ($i = 0; $i < 12; $i++) {
+            $this->image();
+        }
+        $run = $this->start(12);
+        $this->assertSame(5, Auto_Alt_Text_Library_Run::feed(5));
+        $wpdb->query($wpdb->prepare(
+            'UPDATE ' . Auto_Alt_Text_Queue::get_table_name() . ' SET next_attempt_at = %s WHERE run_id = %d',
+            gmdate('Y-m-d H:i:s', time() + 3600), $run['id']
+        ));
+        $this->assertSame(5, Auto_Alt_Text_Library_Run::feed(5));
+        $this->queue()->run();
+        $this->assertCount(5, $this->calls);
+    }
+
+    public function test_feed_stops_at_the_pending_cap() {
+        global $wpdb;
+        for ($i = 0; $i < 40; $i++) {
+            $this->image();
+        }
+        $run = $this->start(40);
+        for ($i = 0; $i < 5; $i++) {
+            Auto_Alt_Text_Library_Run::feed(2);
+            $wpdb->query($wpdb->prepare(
+                'UPDATE ' . Auto_Alt_Text_Queue::get_table_name() . ' SET next_attempt_at = %s WHERE run_id = %d',
+                gmdate('Y-m-d H:i:s', time() + 3600), $run['id']
+            ));
+        }
+        $this->assertSame(10, $this->pending_count());
+        $this->assertSame(0, Auto_Alt_Text_Library_Run::feed(2));
+    }
+
+    public function test_a_late_retry_of_a_finished_run_keeps_its_report() {
+        global $wpdb;
+        for ($i = 0; $i < 3; $i++) {
+            $this->image();
+        }
+        $run = $this->start(3);
+        $mixed = new Auto_Alt_Text_Queue(function (int $id): array {
+            static $n = 0;
+            return ++$n === 3 ? ['status' => 'failed', 'error' => 'Boom'] : ['status' => 'success', 'error' => null];
+        });
+        $mixed->run();
+        $done = Auto_Alt_Text_Library_Run::get($run['id']);
+        $this->assertSame('finished', $done['status']);
+        $this->assertSame(2, $done['summary']['filled']);
+
+        $this->age_rows(8);
+        $this->queue()->run(); // prunes; the latest run's rows stay.
+        $this->assertSame(3, $this->run_row_count($run['id']));
+        $this->assertSame(1, Auto_Alt_Text_Library_Run::retry_failed($run['id']));
+        $this->queue()->run();
+        $after = Auto_Alt_Text_Library_Run::get($run['id']);
+        $this->assertSame('finished', $after['status']);
+        $this->assertSame(3, $after['summary']['filled']);
+        $this->assertSame(0, $after['summary']['skipped']);
+    }
+
+    public function test_prune_keeps_only_the_latest_runs_rows() {
+        $old = $this->image();
+        $first = $this->start(1);
+        $this->queue()->run();
+        $this->assertSame('finished', Auto_Alt_Text_Library_Run::get($first['id'])['status']);
+        update_post_meta($old, '_wp_attachment_image_alt', 'Skrivet av en person');
+        $this->image();
+        $second = $this->start(1);
+        $this->age_rows(8);
+        $this->queue()->run();
+        $this->assertSame(0, $this->run_row_count($first['id']));
+        $this->assertSame(1, $this->run_row_count($second['id']));
+    }
+
+    public function test_the_sweep_spares_a_paused_runs_pending_rows() {
+        $this->image();
+        $this->image();
+        $run = $this->start(2);
+        Auto_Alt_Text_Library_Run::feed(5);
+        Auto_Alt_Text_Library_Run::pause($run['id']);
+        $this->queue()->run();
+        $this->assertSame(2, $this->pending_count());
+    }
+
+    public function test_a_claimed_row_of_a_run_paused_meanwhile_returns_to_pending() {
+        global $wpdb;
+        $id = $this->image();
+        $run = $this->start(1);
+        Auto_Alt_Text_Library_Run::feed(5);
+        $wpdb->query($wpdb->prepare(
+            'UPDATE ' . Auto_Alt_Text_Queue::get_table_name() . ' SET status = %s WHERE attachment_id = %d', 'processing', $id
+        ));
+        Auto_Alt_Text_Library_Run::pause($run['id']);
+        $method = new ReflectionMethod(Auto_Alt_Text_Queue::class, 'process_job');
+        $method->setAccessible(true);
+        $job = $wpdb->get_row($wpdb->prepare(
+            'SELECT * FROM ' . Auto_Alt_Text_Queue::get_table_name() . ' WHERE attachment_id = %d', $id
+        ));
+        $method->invoke($this->queue(), $job);
+        $this->assertSame([], $this->calls);
+        $this->assertSame('pending', $this->row_status($id));
+    }
+
+    public function test_uploads_stay_excluded_while_auto_generate_is_off_during_a_run() {
+        update_option('auto_alt_text_auto_generate', 0);
+        $upload = $this->image('Has alt');
+        (new Auto_Alt_Text_Queue())->enqueue($upload, 'upload');
+        $run_image = $this->image();
+        $this->start(1);
+        $this->queue()->run();
+        $this->assertSame([$run_image], $this->calls);
+        $this->assertSame('pending', $this->row_status($upload));
+    }
+
+    public function test_global_retry_failed_leaves_run_rows_alone() {
+        global $wpdb;
+        $this->image();
+        $run = $this->start(1);
+        (new Auto_Alt_Text_Queue(fn() => ['status' => 'failed', 'error' => 'Boom']))->run();
+        $this->assertSame(0, (new Auto_Alt_Text_Queue())->retry_failed());
+        $this->assertSame(1, (int) $wpdb->get_var('SELECT COUNT(*) FROM ' . Auto_Alt_Text_Queue::get_table_name() . " WHERE status = 'failed'"));
+    }
+
+    public function test_a_person_writing_alt_text_before_the_write_keeps_it_through_the_real_path() {
+        $id = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
+        $run = $this->start(1);
+        $hits = 0;
+        add_filter('pre_http_request', function ($pre, $args, $url) use ($id, &$hits) {
+            if (false === strpos($url, 'openai.com')) {
+                return $pre;
+            }
+            $hits++;
+            update_post_meta($id, '_wp_attachment_image_alt', 'Skrivet av en person');
+            $body = [
+                'status' => 'completed',
+                'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Plugin text.']]]],
+                'usage'  => ['input_tokens' => 10, 'output_tokens' => 3, 'total_tokens' => 13],
+            ];
+            return ['headers' => [], 'body' => wp_json_encode($body), 'response' => ['code' => 200, 'message' => 'OK'], 'cookies' => []];
+        }, 10, 3);
+        (new Auto_Alt_Text_Queue())->run();
+        $this->assertSame(1, $hits);
+        $this->assertSame('Skrivet av en person', get_post_meta($id, '_wp_attachment_image_alt', true));
+        $this->assertSame('', (string) get_post_meta($id, Auto_Alt_Text_Provenance::META_KEY, true));
+        $this->assertSame('skipped', $this->row_status($id));
+        $this->assertSame(1, Auto_Alt_Text_Library_Run::get($run['id'])['summary']['skipped']);
+    }
 }

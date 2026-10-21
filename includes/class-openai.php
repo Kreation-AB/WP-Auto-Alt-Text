@@ -279,6 +279,9 @@ class Auto_Alt_Text_OpenAI  {
         if (!$preview_mode) {
             $cached = Auto_Alt_Text_Cache_Manager::get_cached_response($job['cache_key']);
             if (is_string($cached) && '' !== $cached) {
+                if ($this->library_write_blocked($attachment_id)) {
+                    return null;
+                }
                 Auto_Alt_Text_Logger::log("Retrieved alt text from cache", "info", ['attachment_id' => $attachment_id]);
                 update_post_meta($attachment_id, '_wp_attachment_image_alt', $cached);
                 Auto_Alt_Text_Provenance::record($attachment_id, $generation_type, $cached, $job['model']['id']);
@@ -297,18 +300,24 @@ class Auto_Alt_Text_OpenAI  {
         }
 
         $text = $result['text'];
+        // The spend is real either way, so it is tracked; a blocked write is not "applied".
+        $blocked = !$preview_mode && $this->library_write_blocked($attachment_id);
         $this->statistics->track_generation(
             $attachment_id,
             $text,
             $result['total_tokens'],
             $generation_type,
-            !$preview_mode,
+            !$preview_mode && !$blocked,
             false,
             null,
             $result['model'],
             $result['input_tokens'],
             $result['output_tokens']
         );
+
+        if ($blocked) {
+            return null;
+        }
 
         if (!$preview_mode) {
             update_post_meta($attachment_id, '_wp_attachment_image_alt', $text);
@@ -323,6 +332,30 @@ class Auto_Alt_Text_OpenAI  {
             'name_fix'      => $result['name_fix'],
         ]);
         return $text;
+    }
+
+    /**
+     * Write-time guard for library runs: text a person wrote after the job was
+     * claimed is never overwritten. Applies to run jobs only (run context set);
+     * on a block nothing is stored and the error class becomes "skipped".
+     */
+    private function library_write_blocked(int $attachment_id): bool {
+        $run_id = Auto_Alt_Text_Run_Context::current();
+        if (null === $run_id) {
+            return false;
+        }
+        $run = Auto_Alt_Text_Library_Run::get($run_id);
+        if (null === $run) {
+            return false;
+        }
+        $policy = Auto_Alt_Text_Library_Scanner::policy_for_coverage($run['coverage']);
+        if (Auto_Alt_Text_Provenance::allows_overwrite($attachment_id, $policy)) {
+            return false;
+        }
+        $this->last_error_class = 'skipped';
+        $this->last_error = 'Alt text changed during the run; left untouched.';
+        Auto_Alt_Text_Logger::log('Library write skipped: alt text is no longer eligible', 'info', ['attachment_id' => $attachment_id]);
+        return true;
     }
 
     /**

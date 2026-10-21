@@ -17,6 +17,7 @@ class Auto_Alt_Text_Library_Run {
     private const START_LOCK_SECONDS = 30;
     private const MAX_FAILURES = 500;
     private const FEED_CHUNK = 200;
+    private const FEED_PENDING_CAP_FACTOR = 5;
     private const FEED_BUDGET_SECONDS = 10.0;
     private const UNSUPPORTED_MESSAGE = 'Bildformatet stöds inte.';
 
@@ -259,13 +260,19 @@ class Auto_Alt_Text_Library_Run {
         }
         $queue = new Auto_Alt_Text_Queue();
         $table = Auto_Alt_Text_Queue::get_table_name();
+        $window = max(1, $window);
+        // Only due rows can be claimed, so rows waiting out a backoff do not
+        // take up window; a total cap stops an endless pile of them.
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
-        $pending = (int) $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$table} WHERE run_id = %d AND status = %s",
-            $run['id'], Auto_Alt_Text_Queue::STATUS_PENDING
+        $counts = $wpdb->get_row($wpdb->prepare(
+            "SELECT COUNT(*) AS total, COALESCE(SUM(next_attempt_at <= %s), 0) AS due FROM {$table} WHERE run_id = %d AND status = %s",
+            gmdate('Y-m-d H:i:s'), $run['id'], Auto_Alt_Text_Queue::STATUS_PENDING
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
-        $needed = max(1, $window) - $pending;
+        if ((int) $counts->total >= self::FEED_PENDING_CAP_FACTOR * $window) {
+            return 0;
+        }
+        $needed = $window - (int) $counts->due;
         if ($needed <= 0) {
             return 0;
         }
@@ -273,23 +280,27 @@ class Auto_Alt_Text_Library_Run {
         $cursor = $run['cursor_id'];
         $enqueued = 0;
         $exhausted = false;
+        $supported = Auto_Alt_Text_Image_Source::supported_input_mimes();
+        $policy = Auto_Alt_Text_Library_Scanner::policy_for_coverage($run['coverage']);
         $deadline = microtime(true) + self::FEED_BUDGET_SECONDS;
         while ($needed > 0 && microtime(true) < $deadline) {
-            $ids = $wpdb->get_col($wpdb->prepare(
-                "SELECT ID FROM {$wpdb->posts}
+            $rows = $wpdb->get_results($wpdb->prepare(
+                "SELECT ID, post_mime_type FROM {$wpdb->posts}
                  WHERE ID > %d AND ID <= %d AND post_type = 'attachment' AND post_mime_type LIKE %s
                  ORDER BY ID ASC LIMIT %d",
                 $cursor, $run['max_attachment_id'], 'image/%', self::FEED_CHUNK
             ));
-            if (empty($ids)) {
+            if (empty($rows)) {
                 $exhausted = true;
                 break;
             }
-            update_meta_cache('post', $ids);
-            foreach ($ids as $id) {
-                $id = (int) $id;
+            _prime_post_caches(wp_list_pluck($rows, 'ID'), false, true);
+            foreach ($rows as $row) {
+                $id = (int) $row->ID;
                 $cursor = $id;
-                if (Auto_Alt_Text_Library_Scanner::is_candidate($id, $run['coverage']) && $queue->enqueue_for_run($id, $run['id'])) {
+                if (in_array($row->post_mime_type, $supported, true)
+                    && Auto_Alt_Text_Provenance::allows_overwrite($id, $policy)
+                    && $queue->enqueue_for_run($id, $run['id'])) {
                     $enqueued++;
                     if (--$needed <= 0) {
                         break;
@@ -298,11 +309,13 @@ class Auto_Alt_Text_Library_Run {
             }
         }
 
-        $data = ['cursor_id' => $cursor, 'updated_at' => self::now()];
-        if ($exhausted) {
-            $data['fed_all'] = 1;
-        }
-        $wpdb->update(self::table(), $data, ['id' => $run['id']]);
+        $runs = self::table();
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$runs} SET cursor_id = GREATEST(cursor_id, %d), fed_all = %d, updated_at = %s WHERE id = %d",
+            $cursor, $exhausted ? 1 : (int) $run['fed_all'], self::now(), $run['id']
+        ));
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
         return $enqueued;
     }
 
@@ -323,9 +336,12 @@ class Auto_Alt_Text_Library_Run {
         if ($open > 0) {
             return false;
         }
-        self::finalize($id, self::STATUS_FINISHED);
+        // A cancelled run reopened to retry its failures ends cancelled again.
+        $final = self::STATUS_CANCELLED === ($run['summary']['reopened_from'] ?? null)
+            ? self::STATUS_CANCELLED : self::STATUS_FINISHED;
+        self::finalize($id, $final);
         $after = self::get($id);
-        return null !== $after && self::STATUS_FINISHED === $after['status'];
+        return null !== $after && $final === $after['status'];
     }
 
     /** Stamps the run's last runner tick. */
@@ -408,6 +424,7 @@ class Auto_Alt_Text_Library_Run {
             'cost_usd' => self::cost_so_far($id),
             'failures' => $failures,
         ]);
+        unset($summary['reopened_from']);
         if ($truncated) {
             $summary['failures_truncated'] = true;
         }
@@ -415,7 +432,7 @@ class Auto_Alt_Text_Library_Run {
         $runs = self::table();
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and generated %d list only.
         $changed = $wpdb->query($wpdb->prepare(
-            "UPDATE {$runs} SET status = %s, ended_at = %s, summary = %s, total = %d, skipped_at_feed = skipped_at_feed + %d, updated_at = %s WHERE id = %d AND status IN (%s, %s)",
+            "UPDATE {$runs} SET status = %s, ended_at = %s, summary = %s, total = %d, fed_all = 1, skipped_at_feed = skipped_at_feed + %d, updated_at = %s WHERE id = %d AND status IN (%s, %s)",
             $status, $now, wp_json_encode($summary), $progress['total'], $remainder, $now, $id, self::STATUS_RUNNING, self::STATUS_PAUSED
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
@@ -459,6 +476,7 @@ class Auto_Alt_Text_Library_Run {
 
         $runs = self::table();
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and generated %d list only.
+        $reopened_from = $run['status'];
         $flipped = $wpdb->query($wpdb->prepare(
             "UPDATE {$runs} SET status = %s, ended_at = NULL, updated_at = %s WHERE id = %d AND status IN (%s, %s)",
             self::STATUS_RUNNING, $now, $id, self::STATUS_FINISHED, self::STATUS_CANCELLED
@@ -467,6 +485,8 @@ class Auto_Alt_Text_Library_Run {
         if (1 !== (int) $flipped) {
             return 0;
         }
+        $run['summary']['reopened_from'] = $reopened_from;
+        self::save_summary($id, $run['summary']);
 
         $count = 0;
         foreach (array_chunk($ids, 500) as $chunk) {

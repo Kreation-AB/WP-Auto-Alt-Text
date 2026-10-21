@@ -106,14 +106,36 @@ class Auto_Alt_Text_Queue {
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
         if ($active) {
-            if (null !== $active->run_id || self::STATUS_PENDING !== $active->status) {
+            if (null !== $active->run_id) {
+                // Already this run's job, or another run's: only a pending row of a run that is over is taken over.
+                if ((int) $active->run_id === $run_id || self::STATUS_PENDING !== $active->status) {
+                    return false;
+                }
+                $other = Auto_Alt_Text_Library_Run::get((int) $active->run_id);
+                if (null !== $other && in_array($other['status'], [Auto_Alt_Text_Library_Run::STATUS_RUNNING, Auto_Alt_Text_Library_Run::STATUS_PAUSED], true)) {
+                    return false;
+                }
+            } elseif (self::STATUS_PENDING !== $active->status) {
                 return false;
             }
-            return 1 === (int) $wpdb->update($table, [
-                'run_id'          => $run_id,
-                'generation_type' => self::LIBRARY_TYPE,
-                'updated_at'      => current_time('mysql', true),
-            ], ['id' => (int) $active->id, 'status' => self::STATUS_PENDING, 'run_id' => null]);
+            // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+            return 1 === (int) $wpdb->query($wpdb->prepare(
+                "UPDATE {$table} SET run_id = %d, generation_type = %s, updated_at = %s WHERE id = %d AND status = %s AND ((run_id IS NULL AND %d = 0) OR run_id = %d)",
+                $run_id, self::LIBRARY_TYPE, current_time('mysql', true), (int) $active->id, self::STATUS_PENDING,
+                null === $active->run_id ? 0 : 1, (int) $active->run_id
+            ));
+            // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+        }
+
+        // One row per attachment and run, whatever its status.
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+        $existing = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$table} WHERE attachment_id = %d AND run_id = %d LIMIT 1",
+            $attachment_id, $run_id
+        ));
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+        if ($existing) {
+            return false;
         }
 
         $now = current_time('mysql', true);
@@ -404,6 +426,11 @@ class Auto_Alt_Text_Queue {
                 $this->note_run_resume();
                 return true;
 
+            case 'skipped':
+                // The write-time guard found text a person wrote: nothing was stored.
+                $this->finish($job, self::STATUS_SKIPPED);
+                return true;
+
             case 'quota':
                 // Job untouched: release back to pending, stop the run.
                 $this->note_run_pause('quota');
@@ -459,12 +486,16 @@ class Auto_Alt_Text_Queue {
     private function skip_orphaned_run_jobs(): void {
         global $wpdb;
         $table = self::get_table_name();
-        $run = Auto_Alt_Text_Library_Run::active();
-        $keep = null !== $run ? $wpdb->prepare(' AND run_id <> %d', $run['id']) : '';
-        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and a prepared fragment only.
+        $runs = Auto_Alt_Text_Activator::get_runs_table_name();
+        // One guarded statement: a run reopened by retry_failed() is running
+        // again and its rows are never swept.
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table names only.
         $wpdb->query($wpdb->prepare(
-            "UPDATE {$table} SET status = %s, updated_at = %s WHERE status = %s AND run_id IS NOT NULL{$keep}",
-            self::STATUS_SKIPPED, current_time('mysql', true), self::STATUS_PENDING
+            "UPDATE {$table} q LEFT JOIN {$runs} r ON r.id = q.run_id
+             SET q.status = %s, q.updated_at = %s
+             WHERE q.status = %s AND q.run_id IS NOT NULL AND (r.id IS NULL OR r.status IN (%s, %s))",
+            self::STATUS_SKIPPED, current_time('mysql', true), self::STATUS_PENDING,
+            Auto_Alt_Text_Library_Run::STATUS_CANCELLED, Auto_Alt_Text_Library_Run::STATUS_FINISHED
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
     }
@@ -480,7 +511,7 @@ class Auto_Alt_Text_Queue {
     /** After a quota or auth pause, the first success marks the run as resumed. */
     private function note_run_resume(): void {
         $run = Auto_Alt_Text_Library_Run::active();
-        if (null === $run) {
+        if (null === $run || Auto_Alt_Text_Library_Run::STATUS_RUNNING !== $run['status']) {
             return;
         }
         $events = $run['summary']['events'];
@@ -510,7 +541,7 @@ class Auto_Alt_Text_Queue {
         }
 
         $class = $openai->get_last_error_class();
-        $map = ['quota' => 'quota', 'auth' => 'auth', 'rate_limit' => 'rate_limit', 'permanent' => 'failed'];
+        $map = ['quota' => 'quota', 'auth' => 'auth', 'rate_limit' => 'rate_limit', 'permanent' => 'failed', 'skipped' => 'skipped'];
         return [
             'status' => $map[$class] ?? 'retry',
             'error'  => $openai->get_last_error(),
@@ -609,13 +640,13 @@ class Auto_Alt_Text_Queue {
 
     /**
      * Prunes done and skipped rows older than 7 days and failed rows older
-     * than 30 days. Rows of a run that is still active are kept: its progress
-     * is counted from them.
+     * than 30 days. Rows of the latest run are kept: its progress and report
+     * are counted from them, also after a late retry.
      */
     private function prune() {
         global $wpdb;
         $table = self::get_table_name();
-        $run = Auto_Alt_Text_Library_Run::active();
+        $run = Auto_Alt_Text_Library_Run::latest();
         $keep = null !== $run ? $wpdb->prepare(' AND (run_id IS NULL OR run_id <> %d)', $run['id']) : '';
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and a prepared fragment only.
         $wpdb->query($wpdb->prepare(
@@ -665,9 +696,11 @@ class Auto_Alt_Text_Queue {
         global $wpdb;
         $table = self::get_table_name();
         $now = current_time('mysql', true);
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
         return (int) $wpdb->query($wpdb->prepare(
-            "UPDATE {$table} SET status = %s, attempts = 0, next_attempt_at = %s, updated_at = %s WHERE status = %s",
+            "UPDATE {$table} SET status = %s, attempts = 0, next_attempt_at = %s, updated_at = %s WHERE status = %s AND run_id IS NULL",
             self::STATUS_PENDING, $now, $now, self::STATUS_FAILED
         ));
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
     }
 }
