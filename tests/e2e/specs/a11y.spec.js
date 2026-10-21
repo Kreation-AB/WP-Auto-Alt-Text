@@ -50,6 +50,12 @@ test.describe( 'accessibility', () => {
 		await checkA11y( page, { pageName: 'settings', include: '.wrap' } );
 	} );
 
+	test( 'Hela biblioteket has no new serious accessibility violations', async ( { page } ) => {
+		await page.goto( '/wp-admin/admin.php?page=auto-alt-text-library' );
+		await expect( page.locator( '.wrap' ) ).toBeVisible();
+		await checkA11y( page, { pageName: 'library', include: [ '.wrap' ] } );
+	} );
+
 	test( 'attachment details panel has none', async ( { page } ) => {
 		await openDetails( page );
 		await checkA11y( page, {
