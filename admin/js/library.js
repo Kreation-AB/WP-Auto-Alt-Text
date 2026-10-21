@@ -288,9 +288,14 @@ function renderFailures(run) {
 
 function renderWarning(payload, waiting) {
 	const health = payload.health || {};
-	const visible = Boolean(health.stalled) && !waiting;
-	show($('warning'), visible);
-	show($('warning-cron'), visible && Boolean(health.cron_disabled));
+	// One warning at a time: a missing key is the cause, so it replaces the stall warning.
+	const noKey = runState(payload.run) === 'active' && Boolean(health.no_api_key);
+	const stalled = Boolean(health.stalled) && !waiting && !noKey;
+	setText($('warning-no-key'), t.warning_no_key || '');
+	show($('warning'), noKey || stalled);
+	show($('warning-no-key'), noKey);
+	show($('warning-stalled'), stalled);
+	show($('warning-cron'), stalled && Boolean(health.cron_disabled));
 }
 
 function stateSentence(key) {

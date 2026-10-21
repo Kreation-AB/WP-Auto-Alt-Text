@@ -9,11 +9,13 @@ class Auto_Alt_Text_Library_Rest_Test extends WP_UnitTestCase {
         $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Activator::get_runs_table_name());
         $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Queue::get_table_name());
         $this->seed_counts(10);
+        (new Auto_Alt_Text_OpenAI())->save_api_key('sk-test-not-real');
         wp_set_current_user(self::factory()->user->create(['role' => 'administrator']));
         do_action('rest_api_init');
     }
 
     public function tearDown(): void {
+        delete_option('auto_alt_text_api_key');
         delete_option('aat_library_counts');
         delete_option('aat_library_start_lock');
         wp_unschedule_hook(Auto_Alt_Text_Library_Scanner::RECOUNT_HOOK);
@@ -78,6 +80,18 @@ class Auto_Alt_Text_Library_Rest_Test extends WP_UnitTestCase {
         $this->assertSame(400, $this->start()->get_status());
         update_option('aat_library_counts', ['missing' => 3, 'complete' => false], false);
         $this->assertSame(400, $this->start()->get_status());
+    }
+
+    public function test_start_without_an_api_key_is_400_with_its_message() {
+        if (defined('AUTO_ALT_TEXT_OPENAI_API_KEY') && AUTO_ALT_TEXT_OPENAI_API_KEY) {
+            $this->markTestSkipped('AUTO_ALT_TEXT_OPENAI_API_KEY is defined in this environment');
+        }
+        delete_option('auto_alt_text_api_key');
+        $response = $this->start();
+        $this->assertSame(400, $response->get_status());
+        $this->assertSame('aat_library_no_api_key', $response->get_data()['code']);
+        $this->assertStringContainsString('API-nyckel', $response->get_data()['message']);
+        $this->assertNull($this->call('GET', '')->get_data()['run']);
     }
 
     public function test_second_start_is_409() {

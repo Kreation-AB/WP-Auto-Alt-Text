@@ -7,10 +7,12 @@ class Auto_Alt_Text_Library_Page_Test extends WP_UnitTestCase {
         $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Activator::get_runs_table_name());
         $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Queue::get_table_name());
         $this->seed_counts(10);
+        (new Auto_Alt_Text_OpenAI())->save_api_key('sk-test-not-real');
         wp_set_current_user(self::factory()->user->create(['role' => 'administrator']));
     }
 
     public function tearDown(): void {
+        delete_option('auto_alt_text_api_key');
         delete_option('aat_library_counts');
         delete_option('aat_library_start_lock');
         wp_unschedule_hook(Auto_Alt_Text_Library_Scanner::RECOUNT_HOOK);
@@ -63,6 +65,26 @@ class Auto_Alt_Text_Library_Page_Test extends WP_UnitTestCase {
         $this->assertStringContainsString('id="aat-library-pause"', $html);
         $this->assertStringContainsString('id="aat-library-report"', $html);
         $this->assertStringContainsString('action=aat_library_report', $html);
+    }
+
+    public function test_a_running_run_without_an_api_key_shows_one_warning() {
+        if (defined('AUTO_ALT_TEXT_OPENAI_API_KEY') && AUTO_ALT_TEXT_OPENAI_API_KEY) {
+            $this->markTestSkipped('AUTO_ALT_TEXT_OPENAI_API_KEY is defined in this environment');
+        }
+        $run = Auto_Alt_Text_Library_Run::start('missing', get_current_user_id());
+        $this->assertIsArray($run);
+        $html = $this->output([Auto_Alt_Text_Library_Page::class, 'render']);
+        $this->assertMatchesRegularExpression('/id="aat-library-warning"[^>]* hidden/', $html);
+        $this->assertMatchesRegularExpression('/id="aat-library-warning-no-key"[^>]* hidden/', $html);
+
+        delete_option('auto_alt_text_api_key');
+        // Quiet long enough to count as stalled: the key warning replaces the stall warning.
+        global $wpdb;
+        $wpdb->update(Auto_Alt_Text_Activator::get_runs_table_name(), ['started_at' => gmdate('Y-m-d H:i:s', time() - HOUR_IN_SECONDS)], ['id' => $run['id']]);
+        $html = $this->output([Auto_Alt_Text_Library_Page::class, 'render']);
+        $this->assertMatchesRegularExpression('/id="aat-library-warning"(?![^>]*hidden)/', $html);
+        $this->assertMatchesRegularExpression('/<p id="aat-library-warning-no-key"(?![^>]*hidden)[^>]*>Ingen API-nyckel är sparad – körningen kan inte fortsätta\. Lägg till nyckeln under Inställningar\.</', $html);
+        $this->assertMatchesRegularExpression('/id="aat-library-warning-stalled"[^>]* hidden/', $html);
     }
 
     public function test_status_card_has_three_states_and_runs_no_count_query() {

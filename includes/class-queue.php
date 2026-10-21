@@ -240,7 +240,11 @@ class Auto_Alt_Text_Queue {
         }
         if (null !== $run) {
             Auto_Alt_Text_Library_Run::maybe_finish($run['id']);
-            Auto_Alt_Text_Library_Run::touch_tick($run['id']);
+            // start_tick() bails without a key: that tick is no progress, and
+            // leaving the stamp lets health() report the stalled run.
+            if (self::has_api_key()) {
+                Auto_Alt_Text_Library_Run::touch_tick($run['id']);
+            }
         }
         return $total;
     }
@@ -556,15 +560,22 @@ class Auto_Alt_Text_Queue {
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
     }
 
-    /** Records a quota or auth stop on the active library run. */
+    /**
+     * Records a quota or auth stop on the active library run. A new incident
+     * fires aat_library_run_paused once; a repeat of the last event does not.
+     * A run the user paused has already announced its pause.
+     */
     private function note_run_pause(string $reason): void {
         $run = Auto_Alt_Text_Library_Run::active();
-        if (null !== $run) {
-            Auto_Alt_Text_Library_Run::note_event($run['id'], 'pause', $reason);
+        if (null === $run || !Auto_Alt_Text_Library_Run::note_event($run['id'], 'pause', $reason)) {
+            return;
+        }
+        if (Auto_Alt_Text_Library_Run::STATUS_RUNNING === $run['status']) {
+            do_action('aat_library_run_paused', Auto_Alt_Text_Library_Run::get($run['id']), $reason);
         }
     }
 
-    /** After a quota or auth pause, the first success marks the run as resumed. */
+    /** After a quota or auth pause, the first success marks the run as resumed and fires aat_library_run_resumed. */
     private function note_run_resume(): void {
         $run = Auto_Alt_Text_Library_Run::active();
         if (null === $run || Auto_Alt_Text_Library_Run::STATUS_RUNNING !== $run['status']) {
@@ -572,8 +583,9 @@ class Auto_Alt_Text_Queue {
         }
         $events = $run['summary']['events'];
         $last = end($events);
-        if (false !== $last && 'pause' === $last['type'] && in_array($last['reason'], ['quota', 'auth'], true)) {
-            Auto_Alt_Text_Library_Run::note_event($run['id'], 'resume');
+        if (false !== $last && 'pause' === $last['type'] && in_array($last['reason'], ['quota', 'auth'], true)
+            && Auto_Alt_Text_Library_Run::note_event($run['id'], 'resume')) {
+            do_action('aat_library_run_resumed', Auto_Alt_Text_Library_Run::get($run['id']));
         }
     }
 

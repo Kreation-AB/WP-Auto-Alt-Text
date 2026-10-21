@@ -31,6 +31,10 @@ class Auto_Alt_Text_Library_Run {
 
     /** @return array<string,mixed>|WP_Error */
     public static function start(string $coverage, int $user_id) {
+        // Without a key the queue never processes a job: the run would show as running forever.
+        if (!Auto_Alt_Text_Queue::has_api_key()) {
+            return new WP_Error('aat_library_no_api_key', __('Ingen API-nyckel är sparad. Lägg till nyckeln under Inställningar innan du startar en körning.', 'WP-Auto-Alt-Text'));
+        }
         if (!self::take_start_lock()) {
             return self::active_error();
         }
@@ -189,20 +193,25 @@ class Auto_Alt_Text_Library_Run {
         return ['state' => 'running', 'reason' => null];
     }
 
-    /** Appends an event; a call identical to the last event is ignored. */
-    public static function note_event(int $id, string $type, string $reason = ''): void {
+    /**
+     * Appends an event; a call identical to the last event is ignored.
+     *
+     * @return bool True when an event was appended; false for a duplicate or an unknown run.
+     */
+    public static function note_event(int $id, string $type, string $reason = ''): bool {
         $run = self::get($id);
         if (null === $run) {
-            return;
+            return false;
         }
         $events = $run['summary']['events'];
         $last = end($events);
         if (false !== $last && $last['type'] === $type && $last['reason'] === $reason) {
-            return;
+            return false;
         }
         $events[] = ['type' => $type, 'reason' => $reason, 'at' => self::now()];
         $run['summary']['events'] = $events;
         self::save_summary($id, $run['summary']);
+        return true;
     }
 
     /** @return array{total:int,filled:int,skipped:int,failed:int,pending:int,done:int} */

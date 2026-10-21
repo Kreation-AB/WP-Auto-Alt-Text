@@ -1,6 +1,8 @@
 <?php
 class Auto_Alt_Text_Library_Queue_Test extends WP_UnitTestCase {
     private $calls = [];
+    /** @var array<int,array{0:int,1:string}> */
+    private $pauses = [];
 
     public function setUp(): void {
         parent::setUp();
@@ -187,18 +189,70 @@ class Auto_Alt_Text_Library_Queue_Test extends WP_UnitTestCase {
         $this->assertSame([], $this->calls);
     }
 
+    /** Records [run id, reason] of every aat_library_run_paused in $this->pauses. */
+    private function capture_pauses(): void {
+        $this->pauses = [];
+        add_action('aat_library_run_paused', function ($run, $reason) {
+            $this->pauses[] = [(int) $run['id'], $reason];
+        }, 10, 2);
+    }
+
     public function test_quota_stop_notes_a_pause_event_on_the_run() {
         $this->image();
         $this->image();
         $run = $this->start(2);
+        $this->capture_pauses();
+        $paused = did_action('aat_library_run_paused');
+        $resumed = did_action('aat_library_run_resumed');
         $this->queue('quota')->run();
         $events = Auto_Alt_Text_Library_Run::get($run['id'])['summary']['events'];
         $this->assertSame('pause', end($events)['type']);
         $this->assertSame('quota', end($events)['reason']);
+        $this->assertSame(1, did_action('aat_library_run_paused') - $paused);
+        $this->assertSame([[$run['id'], 'quota']], $this->pauses);
+
+        // The same incident again (a failed probe) fires nothing more.
+        $this->queue('quota')->run();
+        $this->assertSame(1, did_action('aat_library_run_paused') - $paused);
 
         $this->queue('success')->run();
         $events = Auto_Alt_Text_Library_Run::get($run['id'])['summary']['events'];
         $this->assertSame('resume', end($events)['type']);
+        $this->assertSame(1, did_action('aat_library_run_resumed') - $resumed, 'Only the first success after the stop resumes');
+    }
+
+    public function test_auth_stop_fires_one_pause_and_the_first_success_one_resume() {
+        $this->image();
+        $this->image();
+        $run = $this->start(2);
+        $this->capture_pauses();
+        $paused = did_action('aat_library_run_paused');
+        $resumed = did_action('aat_library_run_resumed');
+        $this->queue('auth')->run();
+        $this->assertSame([[$run['id'], 'auth']], $this->pauses);
+        $this->assertSame(0, did_action('aat_library_run_resumed') - $resumed);
+
+        // A new key lifts the pause; the key is rejected again within the same incident.
+        Auto_Alt_Text_Queue::clear_auth_pause();
+        $this->queue('auth')->run();
+        $this->assertSame(1, did_action('aat_library_run_paused') - $paused);
+
+        Auto_Alt_Text_Queue::clear_auth_pause();
+        $this->queue('success')->run();
+        $this->assertSame(1, did_action('aat_library_run_resumed') - $resumed);
+        $this->assertSame(['pause', 'resume'], wp_list_pluck(Auto_Alt_Text_Library_Run::get($run['id'])['summary']['events'], 'type'));
+    }
+
+    public function test_an_automatic_stop_while_the_user_paused_fires_no_second_pause() {
+        $run = $this->start(1);
+        $this->capture_pauses();
+        Auto_Alt_Text_Library_Run::pause($run['id']);
+        $upload = $this->image();
+        (new Auto_Alt_Text_Queue())->enqueue($upload, 'upload');
+        $this->queue('quota')->run();
+        $events = Auto_Alt_Text_Library_Run::get($run['id'])['summary']['events'];
+        $this->assertSame('quota', end($events)['reason'], 'The stop is still recorded for the report');
+        $this->assertSame([[$run['id'], 'user']], $this->pauses);
     }
 
     public function test_run_finishes_when_fed_and_drained() {

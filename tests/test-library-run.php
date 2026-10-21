@@ -9,10 +9,12 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
         $wpdb->query("DELETE FROM {$wpdb->prefix}auto_alt_text_stats");
         delete_option(Auto_Alt_Text_Quota_Monitor::OPTION);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);
+        (new Auto_Alt_Text_OpenAI())->save_api_key('sk-test-not-real');
         $this->seed_counts(10, 4);
     }
 
     public function tearDown(): void {
+        delete_option('auto_alt_text_api_key');
         delete_option(Auto_Alt_Text_Quota_Monitor::OPTION);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);
         delete_option('aat_library_counts');
@@ -124,11 +126,27 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
         $this->assertSame($id, Auto_Alt_Text_Library_Run::latest()['id']);
     }
 
+    public function test_start_refuses_without_an_api_key() {
+        if (defined('AUTO_ALT_TEXT_OPENAI_API_KEY') && AUTO_ALT_TEXT_OPENAI_API_KEY) {
+            $this->markTestSkipped('AUTO_ALT_TEXT_OPENAI_API_KEY is defined in this environment');
+        }
+        delete_option('auto_alt_text_api_key');
+        $before = did_action('aat_library_run_started');
+        $e = Auto_Alt_Text_Library_Run::start('missing', 1);
+        $this->assertWPError($e);
+        $this->assertSame('aat_library_no_api_key', $e->get_error_code());
+        $this->assertStringContainsString('API-nyckel', $e->get_error_message());
+        $this->assertNull(Auto_Alt_Text_Library_Run::latest());
+        $this->assertSame($before, did_action('aat_library_run_started'));
+        $this->assertFalse(get_option('aat_library_start_lock'));
+    }
+
     public function test_note_event_ignores_consecutive_duplicates() {
         $id = $this->start()['id'];
-        Auto_Alt_Text_Library_Run::note_event($id, 'pause', 'quota');
-        Auto_Alt_Text_Library_Run::note_event($id, 'pause', 'quota');
-        Auto_Alt_Text_Library_Run::note_event($id, 'resume');
+        $this->assertTrue(Auto_Alt_Text_Library_Run::note_event($id, 'pause', 'quota'));
+        $this->assertFalse(Auto_Alt_Text_Library_Run::note_event($id, 'pause', 'quota'));
+        $this->assertTrue(Auto_Alt_Text_Library_Run::note_event($id, 'resume'));
+        $this->assertFalse(Auto_Alt_Text_Library_Run::note_event(999999, 'resume'));
         $events = Auto_Alt_Text_Library_Run::get($id)['summary']['events'];
         $this->assertSame(['pause', 'resume'], wp_list_pluck($events, 'type'));
         $this->assertSame('quota', $events[0]['reason']);

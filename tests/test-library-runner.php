@@ -243,6 +243,22 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         }
     }
 
+    public function test_without_an_api_key_a_tick_leaves_no_stamp_and_health_says_why() {
+        if (defined('AUTO_ALT_TEXT_OPENAI_API_KEY') && AUTO_ALT_TEXT_OPENAI_API_KEY) {
+            $this->markTestSkipped('AUTO_ALT_TEXT_OPENAI_API_KEY is defined in this environment');
+        }
+        self::factory()->attachment->create(['post_mime_type' => 'image/jpeg']);
+        $run = $this->start_run();
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::health($run)['no_api_key']);
+
+        delete_option('auto_alt_text_api_key');
+        Auto_Alt_Text_Library_Runner::cron_tick();
+        $after = Auto_Alt_Text_Library_Run::get($run['id']);
+        $this->assertSame('running', $after['status']);
+        $this->assertNull($after['last_tick_at'], 'A tick that cannot call the API is no progress');
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::health($after)['no_api_key']);
+    }
+
     public function test_loopback_args_are_filterable() {
         $this->start_run();
         add_filter('aat_library_loopback_args', fn($args) => $args + ['headers' => ['Authorization' => 'Basic x']]);

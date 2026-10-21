@@ -270,7 +270,7 @@ class Auto_Alt_Text_Library_Runner {
         return (0 === $state['due'] && null !== $state['next']) ? gmdate('Y-m-d H:i:s', $state['next']) : null;
     }
 
-    /** @return array{stalled:bool,cron_disabled:bool} */
+    /** @return array{stalled:bool,cron_disabled:bool,no_api_key:bool} */
     public static function health(array $run): array {
         $stalled = false;
         if ('running' === Auto_Alt_Text_Library_Run::display_state($run)['state']) {
@@ -287,6 +287,8 @@ class Auto_Alt_Text_Library_Runner {
         return [
             'stalled'       => $stalled,
             'cron_disabled' => defined('DISABLE_WP_CRON') && DISABLE_WP_CRON,
+            // The queue processes nothing without a key; the page says so instead of the stall warning.
+            'no_api_key'    => !Auto_Alt_Text_Queue::has_api_key(),
         ];
     }
 }

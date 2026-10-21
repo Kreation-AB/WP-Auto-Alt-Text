@@ -199,15 +199,15 @@ Admin page under Auto Alt Text → Hela biblioteket (`manage_options` only, as a
 
 With the page open or not, a run is kept going by loopback chaining: each tick processes the queue for a time budget, then fires a non-blocking request to `admin-post.php` (authenticated by a stored token) that runs the next tick. WP-Cron's minutely event restarts the chain if it stops. Only one runner works at a time. Pauses for quota and rejected API key are not stored; they are derived from the live signals and the run continues by itself when they clear.
 
-If no tick has run for 10 minutes while work is due, the page shows a stall warning. Loopback requests are often blocked by basic auth, firewalls or local DNS; for a reliable run, and when `DISABLE_WP_CRON` is set, add a system cron entry as described under Background Processing:
+A run can't be started without an API key. If the key is removed while a run is active, the page says so instead of showing the stall warning. If no tick has run for 10 minutes while work is due, the page shows a stall warning. Loopback requests are often blocked by basic auth, firewalls or local DNS; for a reliable run, and when `DISABLE_WP_CRON` is set, add a system cron entry as described under Background Processing:
 
     * * * * * cd /path/to/site && wp cron event run --due-now >/dev/null 2>&1
 
 ### Actions
 
 - `aat_library_run_started( array $run )`: a run was created.
-- `aat_library_run_paused( array $run, string $reason )`: the user paused. `$reason` is always `'user'`; quota and auth stops are derived states and fire no action.
-- `aat_library_run_resumed( array $run )`: the user resumed, or the failed images were retried.
+- `aat_library_run_paused( array $run, string $reason )`: the run paused. `$reason` is `'user'` (the user paused), `'quota'` (the OpenAI quota or billing ran out) or `'auth'` (OpenAI rejected the API key). An automatic stop fires once per incident; the paused state itself stays derived from the live signals.
+- `aat_library_run_resumed( array $run )`: the user resumed, the failed images were retried, or the first image succeeded after an automatic (quota or auth) stop.
 - `aat_library_run_cancelled( array $run )`: the user cancelled, or a reopened (retried) run was closed again.
 - `aat_library_run_finished( array $run )`: every image was processed.
 

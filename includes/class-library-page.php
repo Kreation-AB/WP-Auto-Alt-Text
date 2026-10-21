@@ -176,6 +176,7 @@ class Auto_Alt_Text_Library_Page {
                 'report_hint' => __('Rapporten innehåller inga nycklar och inga alt-texter, så du kan skicka den till din webbyrå.', 'WP-Auto-Alt-Text'),
                 'warning_stalled' => __('Körningen har inte gått framåt på över 10 minuter. Webbplatsen kan inte starta bakgrundsjobb själv – be ditt webbhotell att aktivera WP-Cron eller lägga in ett riktigt cron-jobb.', 'WP-Auto-Alt-Text'),
                 'warning_cron' => __('WP-Cron är avstängt (DISABLE_WP_CRON). Körningen behöver ett system-cron som anropar wp-cron.php.', 'WP-Auto-Alt-Text'),
+                'warning_no_key' => __('Ingen API-nyckel är sparad – körningen kan inte fortsätta. Lägg till nyckeln under Inställningar.', 'WP-Auto-Alt-Text'),
                 'error_generic' => __('Något gick fel. Försök igen.', 'WP-Auto-Alt-Text'),
                 'error_poll' => __('Kunde inte hämta status just nu. Försöker igen.', 'WP-Auto-Alt-Text'),
                 'live_started' => __('Körningen har startat.', 'WP-Auto-Alt-Text'),
@@ -284,8 +285,11 @@ class Auto_Alt_Text_Library_Page {
         $final = null !== $run && !$active;
         $state = null === $run ? null : Auto_Alt_Text_Library_Run::display_state($run);
         $progress = null === $run ? null : Auto_Alt_Text_Library_Run::progress($run);
-        $health = $active ? Auto_Alt_Text_Library_Runner::health($run) : ['stalled' => false, 'cron_disabled' => false];
+        $health = $active ? Auto_Alt_Text_Library_Runner::health($run) : ['stalled' => false, 'cron_disabled' => false, 'no_api_key' => false];
         $waiting = $active ? Auto_Alt_Text_Library_Runner::waiting_until($run) : null;
+        // One warning at a time: a missing key is the cause, so it replaces the stall warning.
+        $no_key = $health['no_api_key'];
+        $stalled = $health['stalled'] && null === $waiting && !$no_key;
         $paused = $active && 'running' !== $state['state'];
         $per_image = self::estimate_per_image();
         $candidates = $counts['missing'];
@@ -328,9 +332,10 @@ class Auto_Alt_Text_Library_Page {
             <h1><?php echo esc_html($s['title']); ?></h1>
             <p class="aat-lib-intro"><?php echo esc_html($s['intro']); ?></p>
 
-            <div id="aat-library-warning" class="aat-lib-warning" role="status"<?php $hidden(!$health['stalled'] || null !== $waiting); ?>>
-                <p id="aat-library-warning-stalled"><?php echo esc_html($s['warning_stalled']); ?></p>
-                <p id="aat-library-warning-cron"<?php $hidden(!$health['cron_disabled']); ?>><?php echo esc_html($s['warning_cron']); ?></p>
+            <div id="aat-library-warning" class="aat-lib-warning" role="status"<?php $hidden(!$stalled && !$no_key); ?>>
+                <p id="aat-library-warning-no-key"<?php $hidden(!$no_key); ?>><?php echo esc_html($s['warning_no_key']); ?></p>
+                <p id="aat-library-warning-stalled"<?php $hidden(!$stalled); ?>><?php echo esc_html($s['warning_stalled']); ?></p>
+                <p id="aat-library-warning-cron"<?php $hidden(!$stalled || !$health['cron_disabled']); ?>><?php echo esc_html($s['warning_cron']); ?></p>
             </div>
             <p id="aat-library-error" class="aat-lib-error" role="alert" hidden></p>
 

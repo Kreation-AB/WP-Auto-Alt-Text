@@ -8,6 +8,7 @@ class Auto_Alt_Text_Library_Report_Test extends WP_UnitTestCase {
         $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Queue::get_table_name());
         $wpdb->query("DELETE FROM {$wpdb->prefix}auto_alt_text_stats");
         $wpdb->query("DELETE FROM {$wpdb->prefix}auto_alt_text_logs");
+        (new Auto_Alt_Text_OpenAI())->save_api_key('sk-test-not-real');
         update_option('aat_library_counts', [
             'missing' => 3, 'ai' => 0, 'human' => 0, 'unsupported' => 0,
             'max_id' => 500, 'updated_at' => time(), 'complete' => true,
