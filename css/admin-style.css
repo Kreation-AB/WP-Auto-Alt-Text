@@ -142,3 +142,108 @@
   border-top: 1px solid #ddd;
   padding-top: 12px;
 }
+/* Settings page: sidebar and sections (Auto_Alt_Text_Settings_Page); admin/js/settings.js makes the sidebar tabs. */
+.aat-settings .aat-settings-nav ul {
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #c3c4c7;
+}
+
+.aat-settings .aat-settings-nav li {
+  margin: 0;
+}
+
+.aat-settings .aat-settings-nav li + li {
+  border-top: 1px solid #f0f0f1;
+}
+
+.aat-settings .aat-settings-nav a {
+  display: block;
+  padding: 8px 12px 8px 9px;
+  border-left: 3px solid transparent;
+  color: #1d2327;
+  text-decoration: none;
+}
+
+.aat-settings .aat-settings-nav a:hover {
+  background: #f6f7f7;
+  color: #135e96;
+}
+
+/* Core's ring, drawn inside so neighbouring items do not cover it. */
+.aat-settings .aat-settings-nav a:focus {
+  box-shadow: inset 0 0 0 2px #2271b1;
+}
+
+.aat-settings .aat-settings-nav [aria-selected="true"] {
+  border-left-color: #2271b1;
+  background: #f0f6fc;
+  color: #2271b1;
+}
+
+.aat-settings .aat-nav-name {
+  display: block;
+  font-weight: 600;
+}
+
+.aat-settings .aat-nav-summary {
+  display: block;
+  margin-top: 2px;
+  color: #50575e;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.aat-settings .aat-nav-summary--error {
+  color: #b32d2e;
+}
+
+.aat-settings .aat-settings-section {
+  margin: 16px 0;
+  padding: 4px 20px 12px;
+  background: #fff;
+  border: 1px solid #c3c4c7;
+}
+
+.aat-settings .aat-settings-section[hidden] {
+  display: none;
+}
+
+.aat-settings .aat-dirty-note {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 4px solid #dba617;
+  background: #fcf9e8;
+  color: #1d2327;
+}
+
+/* WordPress's own breakpoint: below it the sidebar stacks above the panel. */
+@media (min-width: 783px) {
+  .aat-settings {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 1fr);
+    column-gap: 20px;
+    align-items: start;
+  }
+
+  /* The strip and any notice span both columns. Core's common.js moves most notices above this wrapper anyway. */
+  .aat-settings > * {
+    grid-column: 1 / -1;
+  }
+
+  .aat-settings > .aat-settings-nav {
+    grid-column: 1;
+  }
+
+  .aat-settings > #aat-settings-form {
+    grid-column: 2;
+  }
+}
+
+@media (forced-colors: active) {
+  .aat-settings .aat-settings-nav [aria-selected="true"] {
+    border-left-color: Highlight;
+  }
+}

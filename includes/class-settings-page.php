@@ -63,7 +63,7 @@ class Auto_Alt_Text_Settings_Page {
                     <ul>
                         <?php foreach (self::SECTIONS as $slug) : ?>
                             <?php $summary_class = 'aat-nav-summary' . ($summaries[$slug]['error'] ? ' aat-nav-summary--error' : ''); ?>
-                            <li><a href="#aat-section-<?php echo esc_attr($slug); ?>" id="aat-tab-<?php echo esc_attr($slug); ?>" data-section="<?php echo esc_attr($slug); ?>"><span class="aat-nav-name"><?php echo esc_html($headings[$slug]); ?></span><span class="<?php echo esc_attr($summary_class); ?>" id="aat-summary-<?php echo esc_attr($slug); ?>"><?php echo esc_html($summaries[$slug]['text']); ?></span></a></li>
+                            <li><a href="#aat-section-<?php echo esc_attr($slug); ?>" id="aat-tab-<?php echo esc_attr($slug); ?>" data-section="<?php echo esc_attr($slug); ?>"><span class="aat-nav-name"><?php echo esc_html($headings[$slug]); ?></span> <span class="<?php echo esc_attr($summary_class); ?>" id="aat-summary-<?php echo esc_attr($slug); ?>"><?php echo esc_html($summaries[$slug]['text']); ?></span></a></li>
                         <?php endforeach; ?>
                     </ul>
                 </nav>
@@ -136,11 +136,12 @@ class Auto_Alt_Text_Settings_Page {
             $name_text .= ' · ' . $brand;
         }
 
+        $days = (int) get_option('aat_cache_expiration', 30);
         /* translators: %d: number of days */
-        $cache_text = sprintf(__('%d dagar', 'WP-Auto-Alt-Text'), (int) get_option('aat_cache_expiration', 30));
+        $cache_text = sprintf(_n('%d dag', '%d dagar', $days, 'WP-Auto-Alt-Text'), $days);
         if (null !== $cache_count) {
             /* translators: %s: number of cached answers */
-            $cache_text .= ' · ' . sprintf(__('%s sparade', 'WP-Auto-Alt-Text'), number_format_i18n($cache_count));
+            $cache_text .= ' · ' . sprintf(_n('%s sparat', '%s sparade', $cache_count, 'WP-Auto-Alt-Text'), number_format_i18n($cache_count));
         }
 
         return [
@@ -225,7 +226,7 @@ class Auto_Alt_Text_Settings_Page {
         echo '</div>';
     }
 
-    /** The two side actions post their own forms, outside the options form; their buttons point here with form="…". */
+    /** The side actions' own forms, after the options form (buttons use form="…"). Nonce without id or referer: handlers redirect to fixed URLs. */
     private static function render_side_forms(): void {
         $forms = [
             'aat-check-key-form'   => Auto_Alt_Text_Key_Status::CHECK_ACTION,
@@ -234,7 +235,7 @@ class Auto_Alt_Text_Settings_Page {
         foreach ($forms as $id => $action) : ?>
             <form id="<?php echo esc_attr($id); ?>" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                 <input type="hidden" name="action" value="<?php echo esc_attr($action); ?>">
-                <?php wp_nonce_field($action); ?>
+                <input type="hidden" name="_wpnonce" value="<?php echo esc_attr(wp_create_nonce($action)); ?>">
             </form>
         <?php endforeach;
     }
@@ -418,7 +419,7 @@ class Auto_Alt_Text_Settings_Page {
             <p class="aat-cache-count">
                 <?php
                 /* translators: %s: number of cached answers */
-                echo esc_html(sprintf(__('%s sparade svar', 'WP-Auto-Alt-Text'), number_format_i18n($cache_count)));
+                echo esc_html(sprintf(_n('%s sparat svar', '%s sparade svar', $cache_count, 'WP-Auto-Alt-Text'), number_format_i18n($cache_count)));
                 ?>
             </p>
         <?php endif; ?>

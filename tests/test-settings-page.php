@@ -68,6 +68,8 @@ class Auto_Alt_Text_Settings_Page_Test extends WP_UnitTestCase {
         }
         $this->assertSame(1, preg_match('#<nav class="aat-settings-nav".*?</nav>#s', $html, $nav));
         $this->assertSame(6, substr_count($nav[0], 'href="#aat-section-'));
+        // A space keeps the link's text from running together ("AnslutningInte kontrollerad") without CSS.
+        $this->assertSame(6, substr_count($nav[0], '</span> <span class="aat-nav-summary'));
         $this->assertStringContainsString('<h2 id="aat-section-namn-title">Namn och varumärke</h2>', $html);
         $this->assertStringContainsString('<nav class="aat-settings-nav" aria-label="Inställningar">', $html);
         $this->assertStringContainsString('<form method="post" action="options.php" id="aat-settings-form">', $html);
@@ -121,10 +123,19 @@ class Auto_Alt_Text_Settings_Page_Test extends WP_UnitTestCase {
         update_option('aat_cache_expiration', 14);
         Auto_Alt_Text_Cache_Manager::set_cached_response(Auto_Alt_Text_Cache_Manager::get_cache_key(1, []), 'Text');
 
-        $this->assertSame(['text' => '14 dagar · 1 sparade', 'error' => false], Auto_Alt_Text_Settings_Page::summaries()['cache']);
+        $this->assertSame(['text' => '14 dagar · 1 sparat', 'error' => false], Auto_Alt_Text_Settings_Page::summaries()['cache']);
         $html = $this->render_settings_page();
-        $this->assertStringContainsString('1 sparade svar', $html);
+        $this->assertMatchesRegularExpression('#<p class="aat-cache-count">\s*1 sparat svar\s*</p>#', $html);
         $this->assertStringContainsString('I WP-CLI hoppar --no-cache över sparade svar.', $html);
+
+        Auto_Alt_Text_Cache_Manager::set_cached_response(Auto_Alt_Text_Cache_Manager::get_cache_key(2, []), 'Text');
+        $this->assertSame('14 dagar · 2 sparade', Auto_Alt_Text_Settings_Page::summaries()['cache']['text']);
+        $this->assertMatchesRegularExpression('#<p class="aat-cache-count">\s*2 sparade svar\s*</p>#', $this->render_settings_page());
+    }
+
+    public function test_cache_summary_uses_the_singular_for_one_day() {
+        update_option('aat_cache_expiration', 1);
+        $this->assertMatchesRegularExpression('/^1 dag( · |$)/', Auto_Alt_Text_Settings_Page::summaries()['cache']['text']);
     }
 
     public function test_anslutning_summary_flags_a_missing_key_as_an_error() {
@@ -229,8 +240,10 @@ class Auto_Alt_Text_Settings_Page_Test extends WP_UnitTestCase {
             $this->assertGreaterThan($close, $at, "Form $id comes after the options form");
             $side_form = substr($html, $at, strpos($html, '</form>', $at) - $at);
             $this->assertStringContainsString('<input type="hidden" name="action" value="' . $action . '"', $side_form);
-            $this->assertStringContainsString('value="' . wp_create_nonce($action) . '"', $side_form);
+            // No id: the options form's settings_fields() already prints the page's one id="_wpnonce".
+            $this->assertStringContainsString('<input type="hidden" name="_wpnonce" value="' . wp_create_nonce($action) . '">', $side_form);
         }
+        $this->assertSame(1, substr_count($html, 'id="_wpnonce"'));
     }
 
     public function test_cache_cleared_notice() {

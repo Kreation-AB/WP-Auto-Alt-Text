@@ -10,6 +10,10 @@ add_action('admin_init', 'auto_alt_text_register_settings');
 add_action('admin_enqueue_scripts', 'auto_alt_text_admin_styles');
 add_action('admin_enqueue_scripts', ['Auto_Alt_Text_Library_Page', 'enqueue']);
 
+/**
+ * The settings page's stylesheet and admin/js/settings.js (tabs, live summary,
+ * dirty guard), on that page only. The script is an ES module.
+ */
 function auto_alt_text_admin_styles($hook) {
     if ('toplevel_page_auto-alt-text' !== $hook) {
         return;
@@ -20,6 +24,40 @@ function auto_alt_text_admin_styles($hook) {
         [],
         AUTO_ALT_TEXT_VERSION
     );
+    wp_enqueue_script(
+        'auto-alt-text-settings',
+        plugin_dir_url(dirname(__FILE__)) . 'admin/js/settings.js',
+        [],
+        AUTO_ALT_TEXT_VERSION,
+        true
+    );
+    add_filter('script_loader_tag', 'auto_alt_text_settings_module_tag', 10, 2);
+    // The live summary rebuilds the server's texts (Auto_Alt_Text_Settings_Page::summaries()) from these.
+    wp_localize_script('auto-alt-text-settings', 'aatSettings', [
+        'labels' => [
+            'languages' => auto_alt_text_get_supported_languages(),
+            'naming'    => Auto_Alt_Text_Settings_Page::naming_labels(),
+            'policy'    => Auto_Alt_Text_Settings_Page::policy_labels(),
+            'on'        => __('På', 'WP-Auto-Alt-Text'),
+            'off'       => __('Av', 'WP-Auto-Alt-Text'),
+            /* translators: %d: number of days */
+            'day'       => _n('%d dag', '%d dagar', 1, 'WP-Auto-Alt-Text'),
+            /* translators: %d: number of days */
+            'days'      => _n('%d dag', '%d dagar', 2, 'WP-Auto-Alt-Text'),
+        ],
+        'i18n' => [
+            'dirty' => __('Spara dina ändringar först – annars försvinner de.', 'WP-Auto-Alt-Text'),
+        ],
+    ]);
+}
+
+/** Marks the settings script as an ES module (as Auto_Alt_Text_Library_Page::module_tag()). */
+function auto_alt_text_settings_module_tag($tag, $handle) {
+    if ('auto-alt-text-settings' !== $handle) {
+        return $tag;
+    }
+    $tag = preg_replace('/\s+type=([\'"])[^\'"]*\1/', '', (string) $tag);
+    return (string) preg_replace('/<script\s/', '<script type="module" ', (string) $tag, 1);
 }
 
 /**

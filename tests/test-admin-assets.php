@@ -7,6 +7,9 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
     }
 
     public function tearDown(): void {
+        wp_dequeue_script('auto-alt-text-settings');
+        wp_deregister_script('auto-alt-text-settings');
+        remove_filter('script_loader_tag', 'auto_alt_text_settings_module_tag', 10);
         wp_dequeue_script('auto-alt-text-admin-js');
         wp_dequeue_style('auto_alt_text_css');
         // Localized data accumulates on the registered handle; start each test clean.
@@ -79,9 +82,38 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
         $this->assertFalse(wp_style_is('auto_alt_text_css', 'enqueued'));
     }
 
+    public function test_settings_page_loads_the_tabs_script_as_a_module_with_its_labels() {
+        do_action('admin_enqueue_scripts', 'upload.php');
+        $this->assertFalse(wp_script_is('auto-alt-text-settings', 'enqueued'), 'Only on the settings page');
+
+        do_action('admin_enqueue_scripts', 'toplevel_page_auto-alt-text');
+        $this->assertTrue(wp_script_is('auto-alt-text-settings', 'enqueued'));
+        $script = wp_scripts()->registered['auto-alt-text-settings'];
+        $this->assertStringEndsWith('/admin/js/settings.js', $script->src);
+        $this->assertSame(AUTO_ALT_TEXT_VERSION, $script->ver);
+
+        $tag = apply_filters('script_loader_tag', "<script type='text/javascript' src='s.js' id='auto-alt-text-settings-js'></script>\n", 'auto-alt-text-settings', 's.js');
+        $this->assertSame("<script type=\"module\" src='s.js' id='auto-alt-text-settings-js'></script>\n", $tag);
+        $other = "<script src='o.js' id='other-js'></script>\n";
+        $this->assertSame($other, apply_filters('script_loader_tag', $other, 'other', 'o.js'));
+
+        $data = (string) wp_scripts()->get_data('auto-alt-text-settings', 'data');
+        $this->assertSame(1, preg_match('/^var aatSettings = (\{.*\});$/s', $data, $match));
+        $settings = json_decode($match[1], true);
+        $this->assertSame(AUTO_ALT_TEXT_LANGUAGES, $settings['labels']['languages']);
+        $this->assertSame(Auto_Alt_Text_Settings_Page::naming_labels(), $settings['labels']['naming']);
+        $this->assertSame(Auto_Alt_Text_Settings_Page::policy_labels(), $settings['labels']['policy']);
+        $this->assertSame('På', $settings['labels']['on']);
+        $this->assertSame('Av', $settings['labels']['off']);
+        $this->assertSame('%d dag', $settings['labels']['day']);
+        $this->assertSame('%d dagar', $settings['labels']['days']);
+        $this->assertSame('Spara dina ändringar först – annars försvinner de.', $settings['i18n']['dirty']);
+    }
+
     public function test_list_table_pagination_rule_is_scoped_to_the_stats_page() {
         $css = file_get_contents(dirname(__DIR__) . '/css/style.css');
         $this->assertDoesNotMatchRegularExpression('/(^|\})\s*\.tablenav \.tablenav-pages\s*\{/m', $css);
         $this->assertStringContainsString('.aat-stats-page .tablenav .tablenav-pages', $css);
+        $this->assertStringNotContainsString('disabled-field', $css, 'Nothing renders that class any more');
     }
 }

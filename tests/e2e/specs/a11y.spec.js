@@ -44,10 +44,15 @@ test.describe( 'accessibility', () => {
 		await expect( page.locator( '.aat-alt-context' ) ).toHaveText( 'Ingen produkt eller sida hittades', { timeout: 5000 } );
 	}
 
-	test( 'settings page has no new serious accessibility violations', async ( { page } ) => {
+	// axe skips hidden panels, so each section is opened and scanned in turn.
+	test( 'settings page has no new serious accessibility violations in any section', async ( { page } ) => {
 		await page.goto( '/wp-admin/admin.php?page=auto-alt-text' );
 		await expect( page.locator( '.wrap' ) ).toBeVisible();
-		await checkA11y( page, { pageName: 'settings', include: '.wrap' } );
+		for ( const slug of [ 'anslutning', 'sprak', 'namn', 'automatik', 'cache', 'feedback' ] ) {
+			await page.locator( '#aat-tab-' + slug ).click();
+			await expect( page.locator( '#aat-section-' + slug ) ).toBeVisible();
+			await checkA11y( page, { pageName: 'settings', include: '.wrap' } );
+		}
 	} );
 
 	test( 'Hela biblioteket has no new serious accessibility violations', async ( { page } ) => {
