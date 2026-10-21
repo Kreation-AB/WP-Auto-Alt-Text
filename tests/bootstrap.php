@@ -29,6 +29,19 @@ tests_add_filter( 'setup_theme', function () {
 require_once __DIR__ . '/helpers/openai-fixture-redact.php';
 require_once __DIR__ . '/helpers/class-aat-openai-fixtures.php';
 
+// Tests never reach the network. Mocks answer through pre_http_request, which
+// WordPress applies before this block, so an unmocked request fails at once.
+if ( ! defined( 'WP_HTTP_BLOCK_EXTERNAL' ) ) {
+	define( 'WP_HTTP_BLOCK_EXTERNAL', true );
+}
+
+// Core's update checks run on admin_init (the AJAX tests fire it) and would call api.wordpress.org.
+tests_add_filter( 'init', function () {
+	remove_action( 'admin_init', '_maybe_update_core' );
+	remove_action( 'admin_init', '_maybe_update_plugins' );
+	remove_action( 'admin_init', '_maybe_update_themes' );
+} );
+
 require $_tests_dir . '/includes/bootstrap.php';
 
 // The e2e mock needs ABSPATH, so it loads after WordPress's bootstrap. Without AAT_E2E_MOCK it registers nothing.
