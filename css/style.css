@@ -527,3 +527,138 @@
   justify-content: space-between;
   gap: 0.4rem;
 }
+
+/* Hela biblioteket and its status card */
+.aat-library [hidden],
+.aat-lib-card [hidden] {
+  display: none !important;
+}
+.aat-library {
+  max-width: 860px;
+}
+.aat-lib-section,
+.aat-lib-card {
+  background: #fff;
+  border: 1px solid #c3c4c7;
+  border-radius: 4px;
+  padding: 16px 20px;
+  margin: 16px 0;
+  color: #1d2327;
+}
+.aat-lib-card {
+  max-width: 860px;
+}
+.aat-lib-card h2,
+.aat-lib-section h2 {
+  margin-top: 0;
+}
+.aat-lib-note {
+  color: #50575e;
+  font-size: 13px;
+}
+.aat-lib-intro {
+  font-size: 14px;
+  color: #1d2327;
+}
+.aat-lib-counts,
+.aat-lib-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.aat-lib-counts dt,
+.aat-lib-summary dt {
+  color: #50575e;
+  font-size: 13px;
+}
+.aat-lib-counts dd,
+.aat-lib-summary dd {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: #1d2327;
+}
+.aat-lib-summary dd .aat-lib-note {
+  font-size: 13px;
+  font-weight: 400;
+}
+.aat-lib-bar {
+  height: 14px;
+  background: #dcdcde;
+  border-radius: 7px;
+  overflow: hidden;
+}
+.aat-lib-bar-fill {
+  height: 100%;
+  background: #135e96;
+  transition: width 0.4s ease;
+}
+.aat-lib-progress-text {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.aat-lib-stats {
+  margin: 12px 0;
+  padding: 0;
+  list-style: none;
+}
+.aat-lib-recent {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  list-style: disc;
+}
+.aat-lib-recent li {
+  overflow-wrap: anywhere;
+}
+.aat-lib-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.aat-lib-warning {
+  background: #fcf9e8;
+  border: 1px solid #996800;
+  border-left-width: 4px;
+  padding: 4px 16px;
+  margin: 16px 0;
+  color: #1d2327;
+}
+.aat-lib-error {
+  background: #fcf0f1;
+  border: 1px solid #b32d2e;
+  border-left-width: 4px;
+  padding: 8px 16px;
+  color: #8a2424;
+}
+.aat-lib-failures-table td {
+  overflow-wrap: anywhere;
+}
+.aat-lib-dialog {
+  max-width: 480px;
+  border: 1px solid #c3c4c7;
+  border-radius: 4px;
+  padding: 20px 24px;
+  color: #1d2327;
+}
+.aat-lib-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+.aat-library h2:focus,
+.aat-library h2:focus-visible {
+  outline: 2px solid #135e96;
+  outline-offset: 2px;
+}
+.aat-library button:focus-visible,
+.aat-library a:focus-visible,
+.aat-library input:focus-visible,
+.aat-lib-card a:focus-visible,
+.aat-lib-dialog button:focus-visible {
+  outline: 2px solid #135e96;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .aat-lib-bar-fill {
+    transition: none;
+  }
+}

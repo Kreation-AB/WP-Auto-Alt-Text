@@ -8,6 +8,7 @@ add_action('admin_menu', 'auto_alt_text_menu');
 add_action('admin_init', 'auto_alt_text_register_settings');
 
 add_action('admin_enqueue_scripts', 'auto_alt_text_admin_styles');
+add_action('admin_enqueue_scripts', ['Auto_Alt_Text_Library_Page', 'enqueue']);
 
 function auto_alt_text_admin_styles($hook) {
     if ('toplevel_page_auto-alt-text' !== $hook) {
@@ -44,6 +45,15 @@ function auto_alt_text_menu() {
         'manage_options',        // Capability
         'auto-alt-text',         // Menu slug
         'auto_alt_text_options'  // Function
+    );
+
+    add_submenu_page(
+        'auto-alt-text',         // Parent slug
+        'Hela biblioteket',      // Page title
+        'Hela biblioteket',      // Menu title
+        'manage_options',        // Capability
+        Auto_Alt_Text_Library_Page::SLUG, // Menu slug
+        ['Auto_Alt_Text_Library_Page', 'render'] // Function
     );
 
     add_submenu_page(
@@ -104,6 +114,7 @@ function auto_alt_text_options() {
     ?>
     <div class="wrap">
         <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
+        <?php Auto_Alt_Text_Library_Page::render_status_card(); ?>
         <form method="post" action="options.php">
             <?php
             wp_nonce_field('auto_alt_text_nonce_action', 'auto_alt_text_nonce');
