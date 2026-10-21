@@ -1,0 +1,23 @@
+name: CI
+
+# main is still the pre-2.0 release line. GitHub only fires scheduled workflows
+# from the default branch, so this file dispatches the real CI (ci.yml on v2.0)
+# in "latest versions" mode. When v2.0 is merged into main, take v2.0's ci.yml.
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch-latest:
+    name: Dispatch the latest-versions run on v2.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Run ci.yml on v2.0 with latest=true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref v2.0 -f latest=true
