@@ -9,6 +9,9 @@ const LIBRARY_REST = '/wp-auto-alt-text/v1/library';
 const FINAL = [ 'finished', 'cancelled' ];
 
 test.describe( 'library backfill', () => {
+	// Each wpCli call takes a few seconds and the tests make dozens.
+	test.describe.configure( { timeout: 180000 } );
+
 	let requestUtils;
 	let ids = [];
 	let savedAutoGenerate;
@@ -35,8 +38,9 @@ test.describe( 'library backfill', () => {
 				await requestUtils.rest( { method: 'POST', path: `${ LIBRARY_REST }/cancel` } );
 			}
 		} catch ( e ) {
-			// No run to cancel.
+			console.warn( `library spec cleanup: could not cancel the active run: ${ e.message }` );
 		}
+		restoreOption( 'aat_e2e_queue_limits', null );
 		for ( const id of ids ) {
 			await requestUtils.rest( { method: 'DELETE', path: `/wp/v2/media/${ id }`, params: { force: true } } );
 		}
@@ -50,8 +54,17 @@ test.describe( 'library backfill', () => {
 	// Drives the background recount until the cached counts satisfy `done` (at most 10 runs).
 	async function recount( done = () => true ) {
 		let counts;
+		// Schedules the recount and resets its cursor; uploads do not schedule it.
+		await requestUtils.rest( { method: 'POST', path: `${ LIBRARY_REST }/recount` } );
 		for ( let i = 0; i < 10; i++ ) {
-			wpCli( [ 'cron', 'event', 'run', 'aat_library_recount' ] );
+			try {
+				wpCli( [ 'cron', 'event', 'run', 'aat_library_recount' ] );
+			} catch ( e ) {
+				// WP-Cron already ran it, so the event is gone: just read the counts.
+				if ( ! String( e.stderr || e.message ).includes( 'Invalid cron event' ) ) {
+					throw e;
+				}
+			}
 			counts = ( await getState() ).counts;
 			if ( counts.complete && ! counts.recounting && done( counts ) ) {
 				return counts;
@@ -102,7 +115,8 @@ test.describe( 'library backfill', () => {
 		}
 		expect( state.run.display_state ).toBe( 'finished' );
 		const filled = state.run.progress.filled;
-		expect( filled ).toBeGreaterThanOrEqual( 3 );
+		expect( state.run.progress.failed ).toBe( 0 );
+		expect( filled ).toBe( missing );
 
 		await page.reload();
 		await expect( page.locator( '#aat-library-sum-filled' ) ).toHaveText( String( filled ) );
@@ -114,19 +128,28 @@ test.describe( 'library backfill', () => {
 		// page.request carries the admin cookies.
 		const response = await page.request.get( href );
 		expect( response.status() ).toBe( 200 );
-		expect( response.headers()[ 'content-disposition' ] ).toContain( 'alt-text-rapport-' );
-		const body = await response.text();
-		expect( body.includes( 'run' ) || body.includes( String( state.run.id ) ) ).toBe( true );
+		const disposition = response.headers()[ 'content-disposition' ];
+		expect( disposition ).toContain( 'alt-text-rapport-' );
+		expect( disposition ).toContain( `run${ state.run.id }` );
+		expect( await response.text() ).toContain( `Körnings-ID: ${ state.run.id }` );
 	} );
 
 	test( 'cancel keeps written alt texts and stops the run', async ( { page } ) => {
 		const missing = await prepare();
+		// The test mu-plugin then feeds and fills one image per tick.
+		wpCli( [ 'option', 'update', 'aat_e2e_queue_limits', '1' ] );
 		await startFromPage( page, missing );
 
-		wpCli( [ 'cron', 'event', 'run', 'aat_queue_tick' ] );
-		const mid = await getState();
-		// A tick that already finished the whole run leaves nothing to cancel.
-		test.skip( mid.run.display_state === 'finished', 'One tick finished the run before it could be cancelled.' );
+		let mid;
+		for ( let i = 0; i < 5; i++ ) {
+			wpCli( [ 'cron', 'event', 'run', 'aat_queue_tick' ] );
+			mid = await getState();
+			if ( mid.run.progress.filled >= 1 ) {
+				break;
+			}
+		}
+		expect( mid.run.display_state ).toBe( 'running' );
+		expect( mid.run.progress.filled ).toBe( 1 );
 
 		await page.locator( '#aat-library-cancel' ).click();
 		await expect( page.locator( '#aat-library-cancel-dialog' ) ).toBeVisible();
@@ -135,12 +158,17 @@ test.describe( 'library backfill', () => {
 
 		await expect.poll( async () => ( await getState() ).run.display_state ).toBe( 'cancelled' );
 
-		// Whatever was filled before the cancel keeps its text and is recorded as a library write.
+		// Exactly the filled images keep their text, recorded as library writes; the rest stay empty.
+		// The filled image may be a baseline one, so the uploads hold zero or one filled image.
+		const filledIds = [];
 		for ( const id of ids ) {
 			const alt = ( await requestUtils.rest( { path: `/wp/v2/media/${ id }` } ) ).alt_text;
 			if ( alt !== '' ) {
+				filledIds.push( id );
 				expect( provenance( id ).source ).toBe( 'library' );
 			}
 		}
+		expect( filledIds.length ).toBeLessThanOrEqual( 1 );
+		expect( ( await getState() ).run.progress.filled ).toBe( 1 );
 	} );
 } );

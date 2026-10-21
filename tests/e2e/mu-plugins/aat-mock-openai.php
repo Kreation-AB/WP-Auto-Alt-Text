@@ -56,6 +56,12 @@ function aat_e2e_mock_filter( $pre, array $args, string $url ) {
 function aat_e2e_mock_bootstrap( bool $enabled ): void {
 	if ( $enabled ) {
 		add_filter( 'pre_http_request', 'aat_e2e_mock_filter', 10, 3 );
+		// With aat_e2e_queue_limits set, one queue tick feeds and fills a single library image (cancel spec).
+		$aat_e2e_one = static function ( $value ) {
+			return get_option( 'aat_e2e_queue_limits' ) ? 1 : $value;
+		};
+		add_filter( 'aat_library_feed_window', $aat_e2e_one );
+		add_filter( 'aat_queue_batch_size', $aat_e2e_one );
 	}
 }
 
