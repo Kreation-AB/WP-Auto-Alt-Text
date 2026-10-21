@@ -10,7 +10,7 @@ class Auto_Alt_Text_Activator {
     private const CURRENT_DB_VERSION = '1.0';
     private const COLUMN_VERSION = 'db_version';
     /** Bump whenever a CREATE TABLE statement below changes. */
-    private const SCHEMA_VERSION = '1.3';
+    private const SCHEMA_VERSION = '1.4';
     public const DB_VERSION_OPTION = 'auto_alt_text_db_version';
 
     private const COLUMN_GENERATION_TYPE = 'generation_type';
@@ -58,6 +58,15 @@ class Auto_Alt_Text_Activator {
      */
     private static function get_queue_table_name() {
         return self::get_db()->prefix . 'aat_queue';
+    }
+
+    /**
+     * Retrieves the name of the library backfill runs table.
+     *
+     * @return string
+     */
+    public static function get_runs_table_name() {
+        return self::get_db()->prefix . 'aat_runs';
     }
 
     /**
@@ -226,6 +235,7 @@ class Auto_Alt_Text_Activator {
         $stats_table = self::get_stats_table_name();
         $logs_table = self::get_logs_table_name();
         $queue_table = self::get_queue_table_name();
+        $runs_table = self::get_runs_table_name();
 
         try {
             // Create or update tables using dbDelta which handles schema changes safely
@@ -245,9 +255,11 @@ class Auto_Alt_Text_Activator {
                 model varchar(64) DEFAULT NULL,
                 input_tokens int(10) unsigned DEFAULT NULL,
                 output_tokens int(10) unsigned DEFAULT NULL,
+                run_id bigint(20) unsigned DEFAULT NULL,
                 " . self::COLUMN_VERSION . " varchar(10) NOT NULL DEFAULT '" . self::CURRENT_DB_VERSION . "',
                 PRIMARY KEY  (id),
-                KEY idx_image (image_id,generation_time)
+                KEY idx_image (image_id,generation_time),
+                KEY idx_run (run_id)
             ) $charset_collate;";
 
             $logs_table = $wpdb->prefix . 'auto_alt_text_logs';
@@ -270,16 +282,39 @@ class Auto_Alt_Text_Activator {
                 attempts tinyint(3) unsigned NOT NULL DEFAULT 0,
                 next_attempt_at datetime NOT NULL,
                 last_error text DEFAULT NULL,
+                run_id bigint(20) unsigned DEFAULT NULL,
                 created_at datetime NOT NULL,
                 updated_at datetime NOT NULL,
                 PRIMARY KEY  (id),
                 KEY idx_attachment (attachment_id),
-                KEY idx_claim (status,next_attempt_at)
+                KEY idx_claim (status,next_attempt_at),
+                KEY idx_run (run_id,status)
+            ) $charset_collate;";
+
+            $create_runs_sql = "CREATE TABLE {$runs_table} (
+                id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+                status varchar(16) NOT NULL,
+                coverage varchar(16) NOT NULL,
+                started_by bigint(20) unsigned NOT NULL,
+                started_at datetime NOT NULL,
+                ended_at datetime DEFAULT NULL,
+                total int(10) unsigned NOT NULL,
+                estimate_usd decimal(10,4) NOT NULL,
+                max_attachment_id bigint(20) unsigned NOT NULL,
+                cursor_id bigint(20) unsigned NOT NULL DEFAULT 0,
+                fed_all tinyint(1) NOT NULL DEFAULT 0,
+                skipped_at_feed int(10) unsigned NOT NULL DEFAULT 0,
+                last_tick_at datetime DEFAULT NULL,
+                summary longtext DEFAULT NULL,
+                updated_at datetime NOT NULL,
+                PRIMARY KEY  (id),
+                KEY idx_status (status)
             ) $charset_collate;";
 
             dbDelta($create_stats_sql);
             dbDelta($create_logs_sql);
             dbDelta($create_queue_sql);
+            dbDelta($create_runs_sql);
 
             self::migrate_settings();
 

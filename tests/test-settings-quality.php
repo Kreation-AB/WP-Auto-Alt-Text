@@ -52,7 +52,7 @@ class Auto_Alt_Text_Settings_Quality_Test extends WP_UnitTestCase {
         $this->assertContains('model', $columns);
         $this->assertContains('input_tokens', $columns);
         $this->assertContains('output_tokens', $columns);
-        $this->assertSame('1.3', get_option(Auto_Alt_Text_Activator::DB_VERSION_OPTION));
+        $this->assertSame('1.4', get_option(Auto_Alt_Text_Activator::DB_VERSION_OPTION));
     }
 
     public function test_track_generation_records_model_and_tokens() {

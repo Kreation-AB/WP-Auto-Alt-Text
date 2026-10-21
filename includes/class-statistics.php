@@ -122,8 +122,9 @@ class Auto_Alt_Text_Statistics {
                 'model' => null === $model ? null : (string) $model,
                 'input_tokens' => null === $input_tokens ? null : (int) $input_tokens,
                 'output_tokens' => null === $output_tokens ? null : (int) $output_tokens,
+                'run_id' => Auto_Alt_Text_Run_Context::current(),
             ],
-            ['%d', '%d', '%s', '%d', '%s', '%s', '%d', '%d', '%s', '%s', '%d', '%d']
+            ['%d', '%d', '%s', '%d', '%s', '%s', '%d', '%d', '%s', '%s', '%d', '%d', '%d']
         );
     }
 

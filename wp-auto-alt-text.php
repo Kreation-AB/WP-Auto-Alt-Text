@@ -113,6 +113,7 @@ class WP_Auto_Alt_Text_Plugin {
 		require_once __DIR__ . '/includes/class-openai.php';
 		require_once __DIR__ . '/includes/class-rate-limiter.php';
 		require_once __DIR__ . '/includes/options-page.php';
+		require_once __DIR__ . '/includes/class-run-context.php';
 		require_once __DIR__ . '/includes/class-activator.php';
 		require_once __DIR__ . '/includes/class-cache-manager.php';
 		require_once __DIR__ . '/includes/class-queue.php';

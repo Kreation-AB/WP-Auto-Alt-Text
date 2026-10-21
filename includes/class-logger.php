@@ -328,6 +328,12 @@ class Auto_Alt_Text_Logger {
             return;
         }
 
+        // Tag the line with the library run being processed, if any.
+        $run_id = Auto_Alt_Text_Run_Context::current();
+        if (null !== $run_id && !isset($context['run_id'])) {
+            $context['run_id'] = $run_id;
+        }
+
         global $wpdb;
         $table_name = $wpdb->prefix . 'auto_alt_text_logs';
 
