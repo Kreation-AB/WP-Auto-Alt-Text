@@ -178,18 +178,29 @@ class Auto_Alt_Text_Library_Report {
 
     /** Failed queue rows for the run beyond the summary's capped list, newest first. */
     private static function queue_failures(int $run_id, array $listed_failures): array {
-        global $wpdb;
-        $table = Auto_Alt_Text_Queue::get_table_name();
         $listed = count($listed_failures);
         $ids = array_map(static fn($f) => (int) ($f['attachment_id'] ?? 0), $listed_failures);
-        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Internal table name.
+        $rows = self::queue_failure_rows($run_id, self::QUEUE_FAILURE_LIMIT + $listed, 0, true);
+        $rows = array_values(array_filter($rows, static fn($r) => !in_array((int) $r->attachment_id, $ids, true)));
+        return array_slice($rows, 0, self::QUEUE_FAILURE_LIMIT);
+    }
+
+    /**
+     * Failed queue rows of a run, for the report and the page's failure list.
+     *
+     * @return object[] Rows with attachment_id and last_error.
+     */
+    public static function queue_failure_rows(int $run_id, int $limit, int $offset = 0, bool $newest_first = false): array {
+        global $wpdb;
+        $table = Auto_Alt_Text_Queue::get_table_name();
+        $order = $newest_first ? 'DESC' : 'ASC';
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- Internal table name and fixed ORDER BY direction.
         $rows = $wpdb->get_results($wpdb->prepare(
-            "SELECT attachment_id, last_error FROM {$table} WHERE run_id = %d AND status = %s ORDER BY id DESC LIMIT %d",
-            $run_id, Auto_Alt_Text_Queue::STATUS_FAILED, self::QUEUE_FAILURE_LIMIT + $listed
+            "SELECT attachment_id, last_error FROM {$table} WHERE run_id = %d AND status = %s ORDER BY id {$order} LIMIT %d OFFSET %d",
+            $run_id, Auto_Alt_Text_Queue::STATUS_FAILED, $limit, $offset
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-        $rows = array_values(array_filter((array) $rows, static fn($r) => !in_array((int) $r->attachment_id, $ids, true)));
-        return array_slice($rows, 0, self::QUEUE_FAILURE_LIMIT);
+        return (array) $rows;
     }
 
     /** @return string[] */

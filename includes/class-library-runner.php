@@ -256,6 +256,20 @@ class Auto_Alt_Text_Library_Runner {
         wp_die('', '', ['response' => 204]);
     }
 
+    /**
+     * When a running run next has something claimable: set only while nothing
+     * is due and rows wait out a backoff, otherwise null.
+     *
+     * @return string|null UTC datetime.
+     */
+    public static function waiting_until(array $run): ?string {
+        if ('running' !== Auto_Alt_Text_Library_Run::display_state($run)['state']) {
+            return null;
+        }
+        $state = self::claimable_state((int) $run['id']);
+        return (0 === $state['due'] && null !== $state['next']) ? gmdate('Y-m-d H:i:s', $state['next']) : null;
+    }
+
     /** @return array{stalled:bool,cron_disabled:bool} */
     public static function health(array $run): array {
         $stalled = false;
