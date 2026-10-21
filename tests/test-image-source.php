@@ -260,6 +260,9 @@ class Auto_Alt_Text_Image_Source_Test extends WP_UnitTestCase {
             $this->markTestSkipped('Reading EXIF orientation needs ext-exif');
         }
         $path = DIR_TESTDATA . '/images/test-image-rotated-90ccw.jpg';
+        if (!file_exists($path)) {
+            $this->markTestSkipped('The test library has no fixture data/images/test-image-rotated-90ccw.jpg (older wp-phpunit)');
+        }
         $raw = getimagesize($path);
         // Not create_upload_object(): WordPress would swap in its own pre-rotated file on upload.
         $upload = wp_upload_bits('aat-rotated.jpg', null, file_get_contents($path));
