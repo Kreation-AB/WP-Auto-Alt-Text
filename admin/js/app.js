@@ -457,12 +457,8 @@ function showPreviewDialog(altText, attachmentId, isCached, contextText = '') {
       ? `<button class="button feedback-option" data-type="brand_voice">Brand voice</button>`
       : '';
 
-    dialog.innerHTML = `
-        <div class="alt-text-preview-content">
-            <h3 id="preview-title">Förhandsgranska alternativ text ${isCached ? '<span class="cached-badge">Cachead</span>' : ''}</h3>
-            <p class="aat-preview-context" id="aat-preview-context"></p>
-            <textarea class="preview-text" aria-label="Alt text"></textarea>
-
+    const feedbackEnabled = typeof autoAltTextData === 'undefined' || autoAltTextData.feedbackEnabled !== false;
+    const feedbackSection = feedbackEnabled ? `
             <div class="feedback-section">
                 <div class="feedback-header">
                     <h4>Inte nöjd? Förbättra denna alt text</h4>
@@ -481,6 +477,15 @@ function showPreviewDialog(altText, attachmentId, isCached, contextText = '') {
                     <button class="button custom-feedback-submit">Skicka egen feedback</button>
                 </div>
             </div>
+` : '';
+
+    dialog.innerHTML = `
+        <div class="alt-text-preview-content">
+            <h3 id="preview-title">Förhandsgranska alternativ text ${isCached ? '<span class="cached-badge">Cachead</span>' : ''}</h3>
+            <p class="aat-preview-context" id="aat-preview-context"></p>
+            <textarea class="preview-text" aria-label="Alt text"></textarea>
+
+            ${feedbackSection}
 
             <div class="preview-actions">
                 <button class="button button-primary apply-alt-text">Applicera</button>
@@ -514,23 +519,25 @@ function showPreviewDialog(altText, attachmentId, isCached, contextText = '') {
         altText = regeneratedText;
     };
 
-    // Add event listeners for feedback buttons
-    dialog.querySelectorAll('.feedback-option').forEach(button => {
-        button.addEventListener('click', () => {
-            const improvementType = button.dataset.type;
-            regenerateAltTextWithFeedback(attachmentId, nonce, improvementType, '', altText, dialog, setBaseline);
+    if (feedbackEnabled) {
+        // Add event listeners for feedback buttons
+        dialog.querySelectorAll('.feedback-option').forEach(button => {
+            button.addEventListener('click', () => {
+                const improvementType = button.dataset.type;
+                regenerateAltTextWithFeedback(attachmentId, nonce, improvementType, '', altText, dialog, setBaseline);
+            });
         });
-    });
 
-    // Add event listener for custom feedback
-    dialog.querySelector('.custom-feedback-submit').addEventListener('click', () => {
-        const customFeedback = dialog.querySelector('.custom-feedback-text').value;
-        if (customFeedback.trim()) {
-            regenerateAltTextWithFeedback(attachmentId, nonce, 'custom', customFeedback, altText, dialog, setBaseline);
-        } else {
-            alert('Please enter your feedback before submitting.');
-        }
-    });
+        // Add event listener for custom feedback
+        dialog.querySelector('.custom-feedback-submit').addEventListener('click', () => {
+            const customFeedback = dialog.querySelector('.custom-feedback-text').value;
+            if (customFeedback.trim()) {
+                regenerateAltTextWithFeedback(attachmentId, nonce, 'custom', customFeedback, altText, dialog, setBaseline);
+            } else {
+                alert('Please enter your feedback before submitting.');
+            }
+        });
+    }
 
     /**
      * Handles the click event on the "Apply" button in the alt text preview dialog.

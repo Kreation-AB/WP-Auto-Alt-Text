@@ -67,4 +67,25 @@ test.describe( 'media modal', () => {
 		// Apply records the text as written by the modal ('manual'), not by an upload job.
 		expect( provenance( media.id ).source ).toBe( 'manual' );
 	} );
+
+	test( 'the dialog hides the feedback section when the switch is off', async ( { page } ) => {
+		const saved = getOption( 'auto_alt_text_enable_feedback' );
+		wpCli( [ 'option', 'update', 'auto_alt_text_enable_feedback', '0' ] );
+		try {
+			const media = await requestUtils.uploadMedia( SAMPLE );
+			ids.push( media.id );
+
+			await page.goto( '/wp-admin/upload.php?mode=grid' );
+			await page.goto( `/wp-admin/upload.php?item=${ media.id }` );
+			await page.locator( '.generate-alt-text-button' ).click();
+
+			const dialog = page.locator( '.alt-text-preview-dialog' );
+			await expect( dialog.locator( '.preview-text' ) ).toHaveValue( RESP_TEXT );
+			await expect( dialog.locator( '.feedback-section' ) ).toHaveCount( 0 );
+			await expect( dialog.locator( '.apply-alt-text' ) ).toBeVisible();
+			await expect( dialog.locator( '.cancel-alt-text' ) ).toBeVisible();
+		} finally {
+			restoreOption( 'auto_alt_text_enable_feedback', saved );
+		}
+	} );
 } );

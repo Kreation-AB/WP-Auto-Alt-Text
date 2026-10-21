@@ -74,6 +74,22 @@ class Auto_Alt_Text_Ajax_Authorization_Test extends WP_Ajax_UnitTestCase {
         $this->assertSame(0, $this->openai_calls);
     }
 
+    public function test_feedback_regeneration_is_refused_when_the_switch_is_off() {
+        // A saved off switch is a stored row; the registered default (true) would otherwise mask a first write of false.
+        add_option('auto_alt_text_enable_feedback', false);
+        $own_id = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
+
+        $response = $this->ajax('regenerate_alt_text_with_feedback', [
+            'nonce'            => wp_create_nonce('auto_alt_text_nonce'),
+            'attachment_id'    => $own_id,
+            'improvement_type' => 'more_concise',
+        ]);
+
+        $this->assertFalse($response['success'], $this->_last_response);
+        $this->assertSame('Feedback är avstängt i inställningarna.', $response['data']['message']);
+        $this->assertSame(0, $this->openai_calls);
+    }
+
     public function test_batch_skips_attachments_the_user_cannot_edit() {
         $response = $this->ajax('process_image_batch', [
             'nonce' => wp_create_nonce('auto_alt_text_batch_nonce'),

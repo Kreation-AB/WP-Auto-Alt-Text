@@ -54,6 +54,24 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
         $this->assertSame(1, substr_count((string) wp_scripts()->get_data('auto-alt-text-admin-js', 'data'), 'var autoAltTextData'));
     }
 
+    public function test_media_modal_assets_localize_the_feedback_switch() {
+        // Read the JS the page gets, not the PHP array.
+        $localized = static function (): string {
+            wp_dequeue_script('auto-alt-text-admin-js');
+            wp_deregister_script('auto-alt-text-admin-js');
+            set_current_screen('upload');
+            do_action('wp_enqueue_media');
+            $scripts = wp_scripts();
+            return $scripts->get_data('auto-alt-text-admin-js', 'data') . implode("\n", (array) $scripts->get_data('auto-alt-text-admin-js', 'before'));
+        };
+
+        update_option('auto_alt_text_enable_feedback', true);
+        $this->assertMatchesRegularExpression('/feedbackEnabled = true;/', $localized());
+
+        update_option('auto_alt_text_enable_feedback', false);
+        $this->assertMatchesRegularExpression('/feedbackEnabled = false;/', $localized());
+    }
+
     public function test_media_modal_outside_admin_enqueues_nothing() {
         set_current_screen('front');
         do_action('wp_enqueue_media');

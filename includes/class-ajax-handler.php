@@ -260,6 +260,10 @@ class Auto_Alt_Text_Ajax_Handler {
     public function regenerate_alt_text_with_feedback() {
         check_ajax_referer(self::NONCE_ACTION, 'nonce');
 
+        if (!get_option('auto_alt_text_enable_feedback', true)) {
+            wp_send_json_error(['message' => __('Feedback är avstängt i inställningarna.', 'WP-Auto-Alt-Text')]);
+        }
+
         if (!current_user_can('upload_files')) {
             wp_send_json_error(['message' => self::ERROR_INSUFFICIENT_PERMISSIONS]);
             return;

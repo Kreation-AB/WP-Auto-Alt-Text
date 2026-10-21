@@ -136,6 +136,13 @@ class Auto_Alt_Text_Admin {
 			'actionNonce' => wp_create_nonce('auto_alt_text_nonce'),
 			'brandTonalityEnabled' => Auto_Alt_Text_Prompt::NAMING_VISIBLE !== Auto_Alt_Text_Prompt::naming(),
         ]);
+
+        // wp_localize_script() stringifies scalars (false becomes ""), so the switch is set as a real boolean.
+        wp_add_inline_script(
+            self::SCRIPT_HANDLE,
+            'autoAltTextData.feedbackEnabled = ' . wp_json_encode((bool) get_option('auto_alt_text_enable_feedback', true)) . ';',
+            'before'
+        );
     }
 
     /**
