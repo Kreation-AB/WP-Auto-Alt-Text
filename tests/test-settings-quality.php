@@ -148,6 +148,11 @@ class Auto_Alt_Text_Settings_Quality_Test extends WP_UnitTestCase {
         $this->assertNotContains('model_unavailable', wp_list_pluck(get_settings_errors('auto_alt_text_model'), 'code'));
     }
 
+    public function test_default_choice_label_follows_the_model_filter() {
+        add_filter('auto_alt_text_model', fn() => 'gpt-6-luna');
+        $this->assertMatchesRegularExpression('/value=""[^>]*>\s*Standard: GPT-6 Luna/', $this->render_settings_page());
+    }
+
     private function render_settings_page(): string {
         require_once ABSPATH . 'wp-admin/includes/template.php';
         require_once ABSPATH . 'wp-admin/includes/plugin.php';

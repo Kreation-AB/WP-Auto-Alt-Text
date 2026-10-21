@@ -261,7 +261,7 @@ function auto_alt_text_options() {
                                     echo esc_html(sprintf(
                                         /* translators: %s: the default model's name and cost hint */
                                         __('Standard: %s', 'WP-Auto-Alt-Text'),
-                                        auto_alt_text_model_option_label(Auto_Alt_Text_Models::default_id())
+                                        auto_alt_text_model_option_label(Auto_Alt_Text_Models::resolve(''))
                                     ));
                                     ?>
                                 </option>

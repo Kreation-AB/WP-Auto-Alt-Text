@@ -102,8 +102,12 @@ class Auto_Alt_Text_Models {
 
     /** The setting, then the `auto_alt_text_model` filter; unknown IDs fall back to the default. */
     public static function current_id() {
-        $saved = get_option(self::OPTION, '');
-        $id = apply_filters('auto_alt_text_model', is_string($saved) && '' !== $saved ? $saved : self::default_id());
+        return self::resolve((string) get_option(self::OPTION, ''));
+    }
+
+    /** The registry ID in effect for a saved value ('' = the default), after the `auto_alt_text_model` filter. */
+    public static function resolve(string $saved): string {
+        $id = apply_filters('auto_alt_text_model', '' !== $saved ? $saved : self::default_id());
         if (is_string($id) && null !== self::get($id)) {
             return $id;
         }

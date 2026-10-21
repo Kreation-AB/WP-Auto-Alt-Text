@@ -68,4 +68,13 @@ class Auto_Alt_Text_Models_Test extends WP_UnitTestCase {
         update_option(Auto_Alt_Text_Models::OPTION, 'gpt-6-luna');
         $this->assertSame('gpt-6-luna', Auto_Alt_Text_OpenAI::get_model_name());
     }
+
+    public function test_resolve_applies_the_filter_and_falls_back_for_unknown_ids() {
+        $this->assertSame(Auto_Alt_Text_Models::default_id(), Auto_Alt_Text_Models::resolve(''));
+        $this->assertSame('gpt-6-luna', Auto_Alt_Text_Models::resolve('gpt-6-luna'));
+        add_filter('auto_alt_text_model', fn() => 'gpt-5.2');
+        $this->assertSame('gpt-5.2', Auto_Alt_Text_Models::resolve(''));
+        add_filter('auto_alt_text_model', fn() => 'gpt-retired', 20);
+        $this->assertSame(Auto_Alt_Text_Models::default_id(), Auto_Alt_Text_Models::resolve(''));
+    }
 }
