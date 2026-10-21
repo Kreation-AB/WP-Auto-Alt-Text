@@ -95,6 +95,16 @@ class Auto_Alt_Text_Provenance {
         return in_array($policy, self::POLICIES, true) ? $policy : self::POLICY_MISSING;
     }
 
+    /** Whether a fingerprint backfill is scheduled, whatever its cursor argument. */
+    public static function backfill_pending(): bool {
+        foreach ((array) _get_cron_array() as $events) {
+            if (isset($events[self::BACKFILL_HOOK])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Cron callback: fingerprints one batch of pre-2.0 AI alt texts and
      * schedules the next batch until every generated image has been checked.

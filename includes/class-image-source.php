@@ -20,6 +20,20 @@ class Auto_Alt_Text_Image_Source {
     private const DETAILS = ['low', 'high', 'auto', 'original'];
     private const LOCAL_HOST_SUFFIXES = ['.test', '.local', '.localhost', '.internal', '.invalid'];
 
+    /**
+     * Input formats the plugin can send: what the API takes, plus AVIF when
+     * this server's image editor can convert it.
+     *
+     * @return string[]
+     */
+    public static function supported_input_mimes(): array {
+        $mimes = self::API_MIMES;
+        if (wp_image_editor_supports(['mime_type' => 'image/avif'])) {
+            $mimes[] = 'image/avif';
+        }
+        return $mimes;
+    }
+
     private $image_url = '';
     private $detail = 'auto';
     private $temp_files = [];
