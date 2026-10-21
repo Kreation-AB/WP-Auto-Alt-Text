@@ -249,7 +249,7 @@ read -rs OPENAI_API_KEY; export OPENAI_API_KEY; composer fixtures:record; unset 
 
 ### CI
 
-`.github/workflows/ci.yml` runs on push to `v2.0` and `main`, on pull requests, on manual dispatch and weekly (dispatch and schedule only fire once the workflow is on the default branch `main`). Jobs:
+`.github/workflows/ci.yml` runs on push to `v2.0` and `main`, on pull requests, on manual dispatch (Actions tab, "Run workflow"; tick `latest` to test the latest WordPress and WooCommerce) and weekly. Scheduled runs only fire from the default branch `main`: until `v2.0` lands there, `main` carries a small `ci.yml` whose weekly schedule dispatches this workflow on `v2.0` with `latest`. Jobs:
 
 1. `setup`
 2. `static`: lint, PHPCS, PHPStan and the baseline guard
