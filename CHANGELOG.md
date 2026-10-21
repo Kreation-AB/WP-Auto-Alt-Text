@@ -88,6 +88,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - Tomma, avbrutna eller nekade svar från OpenAI sparas aldrig som alt-text. De ger i stället ett tydligt felmeddelande.
 - Genomskinliga bilder skickas inte längre som JPEG med svart bakgrund.
 - Filnamn som är hashar eller kameranamn skickas inte längre till AI:n som ledtråd.
+- Bilder med EXIF-orientering skickas nu upprätta till AI:n.
 
 #### Bakgrund och kö
 
@@ -129,6 +130,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 
 #### Personuppgifter
 
+- På servrar med Imagick skickas bildens EXIF-data (inklusive GPS-position), XMP, IPTC och JPEG-kommentaren inte längre till OpenAI.
 - Verktyg → Exportera personuppgifter fungerar igen och exporterar bara den begärande användarens egna bilder.
 
 ### Säkerhet
