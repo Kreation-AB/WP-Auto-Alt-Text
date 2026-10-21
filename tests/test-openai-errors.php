@@ -38,7 +38,7 @@ class Auto_Alt_Text_OpenAI_Errors_Test extends WP_UnitTestCase {
         return $fixture;
     }
 
-    /** A 500 server_error fixture (no recorded one exists; built from the 429 shape, without retry-after). */
+    /** A 500 server_error fixture (no recorded one exists; synthetic: it only borrows the rate-limited fixture as a base and replaces status, headers and body). */
     private static function server_error() {
         $fixture = Auto_Alt_Text_Test_OpenAI_Fixtures::load('rate-limited');
         $fixture['status'] = 500;
