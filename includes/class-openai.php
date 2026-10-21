@@ -172,11 +172,7 @@ class Auto_Alt_Text_OpenAI  {
      * @return bool True when OpenAI accepts the key.
      */
     public function test_api_key() {
-        if (empty($this->api_key)) {
-            return false;
-        }
-        $response = wp_remote_get(self::MODELS_URL, $this->auth_request_args());
-        return !is_wp_error($response) && 200 === wp_remote_retrieve_response_code($response);
+        return 200 === $this->models_status();
     }
 
     /**
@@ -185,24 +181,42 @@ class Auto_Alt_Text_OpenAI  {
      * @return bool|null True or false, or null when there is no key or OpenAI did not answer clearly.
      */
     public function is_model_available($model_id) {
-        if (empty($this->api_key) || !is_string($model_id) || '' === $model_id) {
+        if (!is_string($model_id) || '' === $model_id) {
             return null;
         }
-        $response = wp_remote_get(self::MODELS_URL . '/' . rawurlencode($model_id), $this->auth_request_args());
-        if (is_wp_error($response)) {
-            return null;
-        }
-        $code = wp_remote_retrieve_response_code($response);
+        $code = $this->models_status($model_id);
         if (200 === $code) {
             return true;
         }
         return 404 === $code ? false : null;
     }
 
-    private function auth_request_args() {
+    /**
+     * HTTP status of GET /v1/models, or of GET /v1/models/{id} for one model.
+     *
+     * @return int|null Null when there is no key or the request failed.
+     */
+    public function models_status(?string $model_id = null, int $timeout = 15): ?int {
+        if (empty($this->api_key)) {
+            return null;
+        }
+        $url = self::MODELS_URL . (null !== $model_id && '' !== $model_id ? '/' . rawurlencode($model_id) : '');
+        $response = wp_remote_get($url, $this->auth_request_args($timeout));
+        return is_wp_error($response) ? null : (int) wp_remote_retrieve_response_code($response);
+    }
+
+    /**
+     * Fingerprint that tells keys apart without storing or exposing them.
+     * Empty without a key.
+     */
+    public function key_fingerprint(): string {
+        return empty($this->api_key) ? '' : hash_hmac('sha256', $this->api_key, wp_salt('auth'));
+    }
+
+    private function auth_request_args(int $timeout = 15) {
         return [
             'headers' => ['Authorization' => 'Bearer ' . $this->api_key],
-            'timeout' => 15,
+            'timeout' => $timeout,
         ];
     }
 

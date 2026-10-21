@@ -123,6 +123,45 @@ class Auto_Alt_Text_Settings_Quality_Test extends WP_UnitTestCase {
         }, 10, 3);
     }
 
+    public function test_a_save_that_changes_nothing_makes_no_remote_call() {
+        $calls = [];
+        $this->count_openai_calls(200, $calls);
+
+        update_option('auto_alt_text_model', 'gpt-6-luna');
+        $this->assertCount(1, $calls);
+        $calls = [];
+        update_option('auto_alt_text_model', 'gpt-6-luna');
+        update_option('language', 'sv');
+
+        $this->assertSame([], $calls);
+    }
+
+    public function test_a_first_ever_model_save_checks_once_and_warns_once() {
+        $calls = [];
+        $this->count_openai_calls(404, $calls);
+        delete_option('auto_alt_text_model');
+
+        update_option('auto_alt_text_model', 'gpt-6-luna');
+
+        $this->assertCount(1, $calls);
+        $errors = array_filter(
+            get_settings_errors('auto_alt_text_model'),
+            function ($e) { return 'model_unavailable' === $e['code']; }
+        );
+        $this->assertCount(1, $errors);
+    }
+
+    private function count_openai_calls(int $code, array &$calls): void {
+        (new Auto_Alt_Text_OpenAI())->save_api_key('sk-proj-' . str_repeat('a', 80));
+        add_filter('pre_http_request', function ($pre, $args, $url) use ($code, &$calls) {
+            if (strpos($url, 'openai.com') === false) {
+                return $pre;
+            }
+            $calls[] = $url;
+            return ['headers' => [], 'body' => '{}', 'response' => ['code' => $code, 'message' => 'x'], 'cookies' => []];
+        }, 10, 3);
+    }
+
     public function test_saving_the_default_choice_checks_the_default_model() {
         $this->mock_model_status(404);
 

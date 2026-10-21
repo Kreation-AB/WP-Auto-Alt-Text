@@ -50,6 +50,13 @@ tests_add_filter( 'init', function () {
 	remove_action( 'admin_init', '_maybe_update_themes' );
 } );
 
+// wp_salt() caches which salts are defined on its first call, so AUTH_SALT has
+// to exist before core boots; a define in a test file comes too late and makes
+// wp_salt('auth') raise an undefined-array-key notice.
+if ( ! defined( 'AUTH_SALT' ) ) {
+	define( 'AUTH_SALT', 'test-auth-salt-0123456789abcdef' );
+}
+
 require $_tests_dir . '/includes/bootstrap.php';
 
 // Sweep the uploads once per run. About 24 test files upload files and almost

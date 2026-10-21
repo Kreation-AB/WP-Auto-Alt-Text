@@ -554,8 +554,11 @@ function auto_alt_text_sanitize_model($value) {
     if (in_array('model_unavailable', wp_list_pluck(get_settings_errors(Auto_Alt_Text_Models::OPTION), 'code'), true)) {
         return $value;
     }
-    $effective = '' === $value ? Auto_Alt_Text_Models::default_id() : $value;
-    if (false === (new Auto_Alt_Text_OpenAI())->is_model_available($effective)) {
+    $effective = Auto_Alt_Text_Models::resolve($value);
+    if (
+        Auto_Alt_Text_Key_Status::needs_check($effective)
+        && Auto_Alt_Text_Key_Status::MODEL_UNAVAILABLE === Auto_Alt_Text_Key_Status::check($effective)
+    ) {
         add_settings_error(
             Auto_Alt_Text_Models::OPTION,
             'model_unavailable',
