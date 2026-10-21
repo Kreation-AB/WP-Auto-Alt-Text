@@ -139,12 +139,12 @@ class Auto_Alt_Text_Library_Runner {
      * Queue::claim_batch(): non-run rows (minus the auto types while
      * auto-generate is off) and the given run's rows.
      *
-     * @return array{due:int,next:?int} Count already due, and the earliest future due time.
+     * @return array{due:int,next:?int,can_feed:bool} Count already due, the earliest future due time, and whether the run could feed more images.
      */
     private static function claimable_state(int $run_id): array {
         global $wpdb;
         $now = current_time('mysql', true);
-        $params = [$now, $now, Auto_Alt_Text_Queue::STATUS_PENDING];
+        $params = [$now, $now, $run_id, Auto_Alt_Text_Queue::STATUS_PENDING];
         $type_clause = '';
         if (!get_option('auto_alt_text_auto_generate', true)) {
             $types = Auto_Alt_Text_Queue::AUTO_GENERATION_TYPES;
@@ -154,26 +154,48 @@ class Auto_Alt_Text_Library_Runner {
         $params[] = $run_id;
         // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and generated placeholders only.
         $row = $wpdb->get_row($wpdb->prepare(
-            'SELECT COALESCE(SUM(next_attempt_at <= %s), 0) AS due, MIN(CASE WHEN next_attempt_at > %s THEN next_attempt_at END) AS next
+            'SELECT COALESCE(SUM(next_attempt_at <= %s), 0) AS due, MIN(CASE WHEN next_attempt_at > %s THEN next_attempt_at END) AS next,
+                    COALESCE(SUM(run_id = %d), 0) AS run_total
              FROM ' . Auto_Alt_Text_Queue::get_table_name() . " WHERE status = %s AND ((run_id IS NULL{$type_clause}) OR run_id = %d)",
             $params
         ));
         // phpcs:enable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
         return [
-            'due'  => $row ? (int) $row->due : 0,
-            'next' => ($row && null !== $row->next) ? (int) strtotime($row->next . ' UTC') : null,
+            'due'      => $row ? (int) $row->due : 0,
+            'next'     => ($row && null !== $row->next) ? (int) strtotime($row->next . ' UTC') : null,
+            'can_feed' => self::can_feed($run_id, $row ? (int) $row->run_total : 0),
         ];
+    }
+
+    private static function run_fed_all(int $run_id): bool {
+        $run = Auto_Alt_Text_Library_Run::get($run_id);
+        return null !== $run && (bool) $run['fed_all'];
+    }
+
+    /** Whether feed() would add images now: not all fed, and below its pending cap. */
+    private static function can_feed(int $run_id, int $run_pending): bool {
+        $run = Auto_Alt_Text_Library_Run::get($run_id);
+        if (null === $run || $run['fed_all']) {
+            return false;
+        }
+        $window = max(1, (int) apply_filters('aat_library_feed_window', 20));
+        return $run_pending < 5 * $window;
     }
 
     /** Waits 1-20 s (and no longer than the remaining budget) until a claimable job is due. */
     private static function idle_wait(float $remaining, int $run_id): void {
         $delay = (new Auto_Alt_Text_Rate_Limiter())->get_recommended_delay();
-        $next = self::claimable_state($run_id)['next'];
+        $state = self::claimable_state($run_id);
+        $next = $state['next'];
         if (null !== $next) {
             $delay = max($delay, $next - time());
+        } elseif (!self::run_fed_all($run_id)) {
+            $delay = max($delay, 0); // Feed scanning keeps moving: the 1 s floor applies.
+        } else {
+            $delay = max($delay, 20); // Nothing claimable and nothing to feed: e.g. a crashed row until recovery.
         }
         $wait = max(1.0, min($remaining, (float) $delay, 20.0));
-        $wait = max(0.0, (float) apply_filters('aat_library_idle_wait', $wait));
+        $wait = max(0.0, min(20.0, (float) apply_filters('aat_library_idle_wait', $wait)));
         if ($wait > 0) {
             usleep((int) round($wait * 1000000));
         }
@@ -197,9 +219,9 @@ class Auto_Alt_Text_Library_Runner {
         if (!Auto_Alt_Text_Queue::has_api_key() || self::lock_held()) {
             return false;
         }
-        // Only long backoffs left: the minutely cron tick restarts the chain.
+        // Only long backoffs left and nothing to feed: the minutely cron tick restarts the chain.
         $state = self::claimable_state($run['id']);
-        if (0 === $state['due'] && null !== $state['next'] && $state['next'] - time() > self::CHAIN_MAX_BACKOFF) {
+        if (0 === $state['due'] && null !== $state['next'] && $state['next'] - time() > self::CHAIN_MAX_BACKOFF && !$state['can_feed']) {
             return false;
         }
         $url = admin_url('admin-post.php');
@@ -243,9 +265,9 @@ class Auto_Alt_Text_Library_Runner {
             $quiet = empty($since) || (time() - (int) strtotime($since . ' UTC')) > $threshold;
             if ($quiet) {
                 // Waiting out a backoff is not a stall: a claimable job must be
-                // due, or the run must have nothing pending at all.
+                // due, the run must have nothing pending at all, or it could feed.
                 $state = self::claimable_state((int) $run['id']);
-                $stalled = $state['due'] > 0 || null === $state['next'];
+                $stalled = $state['due'] > 0 || null === $state['next'] || $state['can_feed'];
             }
         }
         return [

@@ -217,7 +217,7 @@ class Auto_Alt_Text_Queue {
      * checked between batches, so a started batch always finishes.
      * Maintenance runs once per call, not per batch.
      *
-     * @param callable|null $after_batch Called after every batch (e.g. to refresh a lock).
+     * @param callable|null $after_batch Called after every job and after every batch (e.g. to refresh a lock).
      * @return int Number of jobs processed.
      */
     public function run(?float $time_budget = null, ?callable $after_batch = null): int {

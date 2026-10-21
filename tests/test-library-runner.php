@@ -174,8 +174,35 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         $this->assertSame(20.0, $wait);
     }
 
+    private function set_fed_all(int $id, int $fed_all): void {
+        global $wpdb;
+        $wpdb->update(Auto_Alt_Text_Activator::get_runs_table_name(), ['fed_all' => $fed_all], ['id' => $id]);
+    }
+
+    public function test_a_long_backoff_with_images_left_to_feed_still_chains() {
+        $run = $this->start_backed_off_run(2 * HOUR_IN_SECONDS);
+        $this->set_fed_all($run['id'], 0);
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::maybe_chain());
+        $this->set_tick($run['id'], gmdate('Y-m-d H:i:s', time() - 11 * MINUTE_IN_SECONDS));
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::health(Auto_Alt_Text_Library_Run::get($run['id']))['stalled']);
+    }
+
+    public function test_nothing_claimable_and_nothing_to_feed_waits_the_full_20_seconds() {
+        global $wpdb;
+        $run = $this->start_run();
+        $id = self::factory()->attachment->create(['post_mime_type' => 'image/jpeg']);
+        $wpdb->insert(Auto_Alt_Text_Queue::get_table_name(), [
+            'attachment_id' => $id, 'generation_type' => 'library', 'run_id' => $run['id'], 'status' => 'processing',
+            'attempts' => 0, 'next_attempt_at' => gmdate('Y-m-d H:i:s'), 'created_at' => gmdate('Y-m-d H:i:s'), 'updated_at' => gmdate('Y-m-d H:i:s'),
+        ]);
+        $this->set_fed_all($run['id'], 1);
+        [$wait] = $this->tick_and_observe();
+        $this->assertSame(20.0, $wait);
+    }
+
     public function test_a_long_backoff_is_left_to_the_cron_tick() {
         $run = $this->start_backed_off_run(2 * HOUR_IN_SECONDS);
+        $this->set_fed_all($run['id'], 1);
         $this->assertFalse(Auto_Alt_Text_Library_Runner::maybe_chain());
         $this->assertSame([], $this->requests);
 
