@@ -87,6 +87,24 @@ class Auto_Alt_Text_Library_Queue_Test extends WP_UnitTestCase {
         $this->assertSame($ids[5], $this->calls[5]);
     }
 
+    public function test_feed_leaves_no_meta_cached_for_the_chunk_it_scanned() {
+        $ids = [];
+        for ($i = 0; $i < 5; $i++) {
+            $ids[] = $this->image();
+        }
+        $ids[] = $this->image('Skrivet av en person');
+        $this->start(5);
+        // The window fills after two images: the early break still clears the whole chunk.
+        $this->assertSame(2, Auto_Alt_Text_Library_Run::feed(2));
+        foreach ($ids as $id) {
+            $this->assertFalse(wp_cache_get($id, 'post_meta'), "Meta of attachment $id is still cached");
+        }
+        $this->assertSame(3, Auto_Alt_Text_Library_Run::feed(5));
+        foreach ($ids as $id) {
+            $this->assertFalse(wp_cache_get($id, 'post_meta'), "Meta of attachment $id is still cached");
+        }
+    }
+
     public function test_library_jobs_run_while_auto_generate_is_off() {
         update_option('auto_alt_text_auto_generate', 0);
         $id = $this->image();

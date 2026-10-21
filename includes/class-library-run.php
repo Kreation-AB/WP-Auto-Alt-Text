@@ -304,7 +304,8 @@ class Auto_Alt_Text_Library_Run {
                 $exhausted = true;
                 break;
             }
-            update_meta_cache('post', wp_list_pluck($rows, 'ID'));
+            $ids = array_map('intval', wp_list_pluck($rows, 'ID'));
+            update_meta_cache('post', $ids);
             foreach ($rows as $row) {
                 $id = (int) $row->ID;
                 if (in_array($row->post_mime_type, $supported, true)
@@ -322,6 +323,10 @@ class Auto_Alt_Text_Library_Run {
                 if ($needed <= 0) {
                     break;
                 }
+            }
+            // Also after an early break: keeping every chunk's meta cached would exhaust memory on a large library.
+            foreach ($ids as $scanned_id) {
+                wp_cache_delete($scanned_id, 'post_meta');
             }
             if ($stop) {
                 break;

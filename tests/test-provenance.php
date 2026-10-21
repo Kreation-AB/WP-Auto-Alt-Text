@@ -183,6 +183,26 @@ class Auto_Alt_Text_Provenance_Test extends WP_UnitTestCase {
         $this->assertSame(0, Auto_Alt_Text_Provenance::backfill_batch($last, 2));
     }
 
+    public function test_backfill_leaves_no_meta_cached_for_its_batch() {
+        Auto_Alt_Text_Activator::activate();
+        global $wpdb;
+        $wpdb->query("DELETE FROM {$wpdb->prefix}auto_alt_text_stats");
+        $unchanged = $this->image_with_alt('Latest AI text');
+        $edited = $this->image_with_alt('Editor rewrote it');
+        $fingerprinted = $this->image_with_alt('Already fingerprinted');
+        Auto_Alt_Text_Provenance::record($fingerprinted, 'upload');
+        $this->insert_generation($unchanged, 'Latest AI text', '2026-01-01 10:00:00');
+        $this->insert_generation($edited, 'Original AI text', '2026-01-01 10:00:00');
+        $this->insert_generation($fingerprinted, 'Already fingerprinted', '2026-01-01 10:00:00');
+
+        Auto_Alt_Text_Provenance::backfill_batch(0, 200);
+
+        foreach ([$unchanged, $edited, $fingerprinted] as $id) {
+            $this->assertFalse(wp_cache_get($id, 'post_meta'), "Meta of attachment $id is still cached");
+        }
+        $this->assertSame('ai', Auto_Alt_Text_Provenance::classify($unchanged));
+    }
+
     public function test_activation_schedules_the_backfill_and_adds_the_context_column() {
         wp_clear_scheduled_hook('aat_provenance_backfill', [0]);
         Auto_Alt_Text_Activator::activate();

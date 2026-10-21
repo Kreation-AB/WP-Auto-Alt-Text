@@ -146,6 +146,10 @@ class Auto_Alt_Text_Provenance {
                 self::record($image_id, 'backfill');
             }
         }
+        // A recount drains batches in a loop: keeping every batch's meta cached would exhaust memory on a large library.
+        foreach ($image_ids as $image_id) {
+            wp_cache_delete((int) $image_id, 'post_meta');
+        }
 
         return empty($image_ids) ? 0 : (int) end($image_ids);
     }

@@ -53,7 +53,8 @@ class Auto_Alt_Text_Library_Scanner {
             return $counts;
         }
 
-        update_meta_cache('post', wp_list_pluck($rows, 'ID'));
+        $ids = array_map('intval', wp_list_pluck($rows, 'ID'));
+        update_meta_cache('post', $ids);
         $supported = Auto_Alt_Text_Image_Source::supported_input_mimes();
         foreach ($rows as $row) {
             $id = (int) $row->ID;
@@ -63,6 +64,10 @@ class Auto_Alt_Text_Library_Scanner {
                 continue;
             }
             $counts[Auto_Alt_Text_Provenance::classify($id)]++;
+        }
+        // A recount loops over chunks: keeping every chunk's meta cached would exhaust memory on a large library.
+        foreach ($ids as $id) {
+            wp_cache_delete($id, 'post_meta');
         }
         return $counts;
     }

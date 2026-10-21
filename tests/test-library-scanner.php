@@ -42,6 +42,15 @@ class Auto_Alt_Text_Library_Scanner_Test extends WP_UnitTestCase {
         $this->assertSame($svg, $counts['last_id']);
     }
 
+    public function test_count_chunk_leaves_no_meta_cached_for_its_rows() {
+        $ids = [$this->image(), $this->image('Written by an editor'), $this->ai_image(), $this->image(null, 'image/svg+xml')];
+        $counts = Auto_Alt_Text_Library_Scanner::count_chunk($this->base_id, 100);
+        $this->assertSame(end($ids), $counts['last_id']);
+        foreach ($ids as $id) {
+            $this->assertFalse(wp_cache_get($id, 'post_meta'), "Meta of attachment $id is still cached");
+        }
+    }
+
     public function test_count_chunk_pages_by_id() {
         $this->image();
         $this->image();
