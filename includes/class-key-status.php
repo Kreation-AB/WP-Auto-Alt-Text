@@ -29,9 +29,15 @@ class Auto_Alt_Text_Key_Status {
         $record = self::record();
 
         if ('' === $fingerprint) {
+            // A future "key can't be read" state (a key lost to an AUTH_SALT rotation, spec §6.2) goes here, next to none.
             return self::result(self::NONE, $model, null);
         }
-        if (false !== get_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT)) {
+        // A blocked connector is classed 'auth' too and pauses the queue, but says nothing about the key:
+        // the connector notice owns that case, so the status reads as though there were no pause.
+        if (
+            false !== get_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT)
+            && !Auto_Alt_Text_Connector_Status::is_blocked()
+        ) {
             return self::result(self::AUTH_FAILED, $model, $record['at'] ?? null);
         }
         if (Auto_Alt_Text_Quota_Monitor::is_active()) {
@@ -79,7 +85,8 @@ class Auto_Alt_Text_Key_Status {
             'fp'    => $fingerprint,
         ], false);
 
-        if (self::OK === $state) {
+        // Both answers prove the key authenticates.
+        if (self::OK === $state || self::MODEL_UNAVAILABLE === $state) {
             Auto_Alt_Text_Queue::clear_auth_pause();
         }
         return $state;
@@ -102,7 +109,8 @@ class Auto_Alt_Text_Key_Status {
 
     /** Shown on the Media Library and the plugin's own screens, except the settings page, which shows the status inline. */
     public static function render_admin_notice(): void {
-        if (!current_user_can('manage_options')) {
+        // While the connector is blocked, its own notice says what to do.
+        if (!current_user_can('manage_options') || Auto_Alt_Text_Connector_Status::is_blocked()) {
             return;
         }
         $screen = function_exists('get_current_screen') ? get_current_screen() : null;
@@ -144,11 +152,18 @@ class Auto_Alt_Text_Key_Status {
         return $record;
     }
 
+    /**
+     * A found failure stays until the key or the model changes or a new check runs;
+     * only 'ok' and 'unknown' go stale after STALE_AFTER.
+     */
     private static function is_valid(array $record, string $model_id, string $fingerprint): bool {
         return '' !== $fingerprint
             && $record['model'] === $model_id
             && hash_equals($record['fp'], $fingerprint)
-            && time() - $record['at'] <= self::STALE_AFTER;
+            && (
+                in_array($record['state'], [self::AUTH_FAILED, self::MODEL_UNAVAILABLE], true)
+                || time() - $record['at'] <= self::STALE_AFTER
+            );
     }
 
     private static function result(string $state, string $model, ?int $checked_at): array {

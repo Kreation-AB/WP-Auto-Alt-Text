@@ -170,6 +170,23 @@ class Auto_Alt_Text_Settings_Page_Test extends WP_UnitTestCase {
         $this->assertStringNotContainsString('kontrollerad för', $html);
     }
 
+    public function test_page_never_prints_the_key_or_its_fingerprint() {
+        $this->skip_if_key_constant();
+        $requests = 0;
+        $openai = new Auto_Alt_Text_OpenAI();
+        $openai->save_api_key($this->key());
+        $this->count_requests(200, $requests);
+        $this->assertSame('ok', Auto_Alt_Text_Key_Status::check(Auto_Alt_Text_Models::current_id()));
+        $fingerprint = (new Auto_Alt_Text_OpenAI())->key_fingerprint();
+        $this->assertSame($fingerprint, get_option(Auto_Alt_Text_Key_Status::OPTION)['fp']);
+
+        $html = $this->render_settings_page();
+
+        $this->assertStringContainsString('aat-key-status--ok', $html, 'The stored check is the one rendered');
+        $this->assertStringNotContainsString($fingerprint, $html);
+        $this->assertStringNotContainsString($this->key(), $html);
+    }
+
     public function test_strip_shows_the_key_warning_without_a_key_and_the_library_status_with_one() {
         $this->skip_if_key_constant();
 
