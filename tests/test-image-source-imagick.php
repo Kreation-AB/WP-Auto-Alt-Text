@@ -100,4 +100,43 @@ class Auto_Alt_Text_Image_Source_Imagick_Test extends WP_UnitTestCase {
         $this->assertSame([426, 640], [$info[0], $info[1]], 'auto leaves this image unresized');
         $this->assert_stripped($file, $blob);
     }
+
+    public function test_lossless_webp_stays_lossless() {
+        $this->requireImagick();
+        $file = 'webp-lossless.webp';
+        $this->assertSame('lossless', wp_get_webp_info(DIR_TESTDATA . '/images/' . $file)['type'], 'The fixture must be lossless');
+        $blob = $this->output_blob($file, 'auto');
+
+        $copy = wp_tempnam('aat-lossless');
+        file_put_contents($copy, $blob);
+        $info = wp_get_webp_info($copy);
+        wp_delete_file($copy);
+
+        $this->assertSame('lossless', $info['type'], 'Rewriting the copy without its metadata must not make it lossy');
+    }
+
+    public function test_a_copy_imagick_cannot_read_back_is_an_error() {
+        $this->requireImagick();
+        $file = 'canola.jpg';
+        if (!(wp_get_image_editor(DIR_TESTDATA . '/images/' . $file) instanceof WP_Image_Editor_Imagick)) {
+            $this->markTestSkipped('Imagick cannot handle ' . $file);
+        }
+        $id = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/' . $file);
+
+        // Core applies this filter after writing the copy, before the metadata is stripped:
+        // garble the copy there, as a failed write would, so Imagick cannot read it back.
+        $garble = static function ($filename) {
+            file_put_contents($filename, 'not an image');
+            return $filename;
+        };
+        add_filter('image_make_intermediate_size', $garble);
+        try {
+            $source = Auto_Alt_Text_Image_Source::for_attachment($id, 'auto');
+        } finally {
+            remove_filter('image_make_intermediate_size', $garble);
+        }
+
+        $this->assertWPError($source, 'A copy whose metadata cannot be stripped must never be sent');
+        $this->assertSame('image_metadata_failed', $source->get_error_code());
+    }
 }
