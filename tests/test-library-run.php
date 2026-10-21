@@ -179,8 +179,13 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
         $this->assertSame($file, $run['summary']['failures'][0]['file']);
         $this->assertSame(1, did_action('aat_library_run_finished') - $before);
 
+        // A finished run adds the images of the total that never became jobs (5) to skipped.
+        $final = ['total' => 10, 'filled' => 2, 'skipped' => 7, 'failed' => 1, 'pending' => 0, 'done' => 10];
+        $this->assertSame($final, Auto_Alt_Text_Library_Run::progress($run));
+        $this->assertSame(6, $run['skipped_at_feed']);
+
         $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Queue::get_table_name());
-        $this->assertSame($expected, Auto_Alt_Text_Library_Run::progress(Auto_Alt_Text_Library_Run::get($id)));
+        $this->assertSame($final, Auto_Alt_Text_Library_Run::progress(Auto_Alt_Text_Library_Run::get($id)));
     }
 
     public function test_cost_so_far_prices_the_runs_stats_rows() {
