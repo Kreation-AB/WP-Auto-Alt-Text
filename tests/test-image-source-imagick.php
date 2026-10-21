@@ -66,13 +66,13 @@ class Auto_Alt_Text_Image_Source_Imagick_Test extends WP_UnitTestCase {
     private function profile_names($blob) {
         $image = new Imagick();
         $image->readImageBlob($blob);
-        return array_keys($image->getImageProfiles('*', false) ?: []) ?: [];
+        return array_values($image->getImageProfiles('*', false) ?: []);
     }
 
     private function assert_stripped($file, $blob) {
         $source = new Imagick(DIR_TESTDATA . '/images/' . $file);
         $this->assertNotEmpty($source->getImageProperties('exif:*'), 'The fixture must carry EXIF');
-        $expected = array_values(array_intersect(array_keys($source->getImageProfiles('*', false)), ['icc', 'icm']));
+        $expected = array_values(array_intersect(array_values($source->getImageProfiles('*', false)),['icc', 'icm']));
         sort($expected);
 
         $image = new Imagick();
