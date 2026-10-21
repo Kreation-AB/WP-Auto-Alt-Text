@@ -202,6 +202,42 @@ class Auto_Alt_Text_Generation_Pipeline_Test extends WP_UnitTestCase {
         $this->assertCount(2, $this->requests, 'A different model is a different cache entry');
     }
 
+    public function test_no_cache_override_skips_the_cache_read_and_refreshes_it() {
+        $this->replies = ['Cached text.', 'Fresh text.'];
+        $id = $this->image();
+        $openai = $this->openai();
+        $url = wp_get_attachment_url($id);
+
+        $this->assertSame('Cached text.', $openai->generate_alt_text($url, $id, 'cli'));
+        $openai->set_run_overrides(['no_cache' => true]);
+        $this->assertSame('Fresh text.', $openai->generate_alt_text($url, $id, 'cli'));
+        $this->assertCount(2, $this->requests, 'The cached answer was not read');
+        $this->assertFalse($openai->last_from_cache());
+
+        $openai->set_run_overrides([]);
+        $this->assertSame('Fresh text.', $openai->generate_alt_text($url, $id, 'cli'));
+        $this->assertCount(2, $this->requests, 'The fresh result replaced the cache entry');
+    }
+
+    public function test_last_from_cache_reports_a_cache_hit() {
+        $this->replies = ['Cached text.'];
+        $id = $this->image();
+        $openai = $this->openai();
+        $url = wp_get_attachment_url($id);
+
+        $this->assertFalse($openai->last_from_cache());
+        $openai->generate_alt_text($url, $id, 'cli');
+        $this->assertFalse($openai->last_from_cache(), 'A fresh call is not a cache hit');
+
+        $this->assertSame('Cached text.', $openai->generate_alt_text($url, $id, 'cli'));
+        $this->assertTrue($openai->last_from_cache());
+        $this->assertCount(1, $this->requests);
+
+        update_option(Auto_Alt_Text_Models::OPTION, $this->other_model());
+        $openai->generate_alt_text($url, $id, 'cli');
+        $this->assertFalse($openai->last_from_cache(), 'The flag resets on every call');
+    }
+
     public function test_failure_writes_nothing_and_removes_temp_files() {
         $before = $this->temp_count();
         $this->replies[] = ['status' => 'completed', 'output' => [['type' => 'message', 'content' => [['type' => 'refusal', 'refusal' => 'No.']]]]];

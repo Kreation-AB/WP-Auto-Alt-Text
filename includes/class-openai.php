@@ -19,8 +19,9 @@ class Auto_Alt_Text_OpenAI  {
     private $max_wait_seconds = self::MAX_RETRY_DELAY_SECONDS;
     private $last_error_class = null;
     private $context_post_id = null;
+    private $last_from_cache = false;
 
-    /** Per-run overrides from WP-CLI and the eval: 'naming', 'model', 'detail'. */
+    /** Per-run overrides from WP-CLI and the eval: 'naming', 'model', 'detail', 'no_cache'. */
     private $run_overrides = [];
 
     public function __construct(?Auto_Alt_Text_Language_Manager $language_manager = null) {
@@ -155,7 +156,14 @@ class Auto_Alt_Text_OpenAI  {
      * WP-CLI passes --naming and --model here instead of writing options.
      */
     public function set_run_overrides(array $overrides) {
-        $this->run_overrides = array_intersect_key($overrides, array_flip(['naming', 'model', 'detail']));
+        $this->run_overrides = array_intersect_key($overrides, array_flip(['naming', 'model', 'detail', 'no_cache']));
+    }
+
+    /**
+     * Whether the last generate_alt_text() call was answered from the cache.
+     */
+    public function last_from_cache(): bool {
+        return $this->last_from_cache;
     }
 
     /**
@@ -273,6 +281,7 @@ class Auto_Alt_Text_OpenAI  {
      */
     public function generate_alt_text($image_source, $attachment_id, $generation_type = 'manual', $preview_mode = false, $language_override = null) {
         $attachment_id = (int) $attachment_id;
+        $this->last_from_cache = false;
         Auto_Alt_Text_Logger::log("Starting alt text generation", "info", [
             'attachment_id' => $attachment_id,
             'type' => $generation_type,
@@ -290,12 +299,13 @@ class Auto_Alt_Text_OpenAI  {
 
         $job = $this->prepare_generation($attachment_id, (string) $generation_type, $overrides);
 
-        if (!$preview_mode) {
+        if (!$preview_mode && empty($this->run_overrides['no_cache'])) {
             $cached = Auto_Alt_Text_Cache_Manager::get_cached_response($job['cache_key']);
             if (is_string($cached) && '' !== $cached) {
                 if ($this->library_write_blocked($attachment_id)) {
                     return null;
                 }
+                $this->last_from_cache = true;
                 Auto_Alt_Text_Logger::log("Retrieved alt text from cache", "info", ['attachment_id' => $attachment_id]);
                 update_post_meta($attachment_id, '_wp_attachment_image_alt', $cached);
                 Auto_Alt_Text_Provenance::record($attachment_id, $generation_type, $cached, $job['model']['id']);

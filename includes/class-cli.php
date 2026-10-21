@@ -57,6 +57,9 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
      * [--model=<id>]
      * : OpenAI model for this run, e.g. `gpt-6-luna`. Default: the plugin setting.
      *
+     * [--no-cache]
+     * : Skip cached answers for this run; fresh results are still cached.
+     *
      * ### Examples
      *
      *     `wp auto-alt-text generate`
@@ -78,6 +81,8 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
      *     `wp auto-alt-text generate --brand-tonality`
      *
      *     `wp auto-alt-text generate --naming=product --model=gpt-6-luna`
+     *
+     *     `wp auto-alt-text generate --no-cache`
      */
     public function generate($args, $assoc_args) {
         $limit = $this->validateLimit($assoc_args['limit'] ?? self::QUERY_POSTS_PER_PAGE);
@@ -88,6 +93,7 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
         $model_override = $this->resolve_model($assoc_args);
         $naming = Auto_Alt_Text_Prompt::naming($naming_override);
         $model = $model_override ?? Auto_Alt_Text_Models::current_id();
+        $no_cache = isset($assoc_args['no-cache']);
 
         $this->validate_generate_batch_arguments($assoc_args);
 
@@ -106,7 +112,7 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
 
         // Per-run choices reach the generator directly; no option is ever written.
         $this->openai->set_run_overrides(array_filter(
-            ['naming' => $naming_override, 'model' => $model_override],
+            ['naming' => $naming_override, 'model' => $model_override, 'no_cache' => $no_cache ? true : null],
             static function ($value) {
                 return null !== $value;
             }
@@ -114,7 +120,13 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
 
         try {
             WP_CLI::log(sprintf('Naming: %s', $naming));
-            WP_CLI::log(sprintf('Model: %s', $model));
+            $run_lines = [sprintf('Model: %s', $model)];
+            if ($no_cache) {
+                $run_lines[] = 'Cache: skipped for this run (--no-cache)';
+            }
+            foreach ($run_lines as $run_line) {
+                WP_CLI::log($run_line);
+            }
 
             if (!empty($requested_languages)) {
                 $formatted_languages = implode(', ', $this->format_languages_for_log($requested_languages));
@@ -201,7 +213,12 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
                 $alt_text = $this->openai->generate_alt_text($image_url, $attachment_id, 'cli', false, $language_override);
 
                 if ($alt_text) {
-                    WP_CLI::success(sprintf('Generated alt text for image %d: %s', $attachment_id, $alt_text));
+                    WP_CLI::success(sprintf(
+                        'Generated alt text for image %d: %s%s',
+                        $attachment_id,
+                        $alt_text,
+                        $this->openai->last_from_cache() ? ' (from cache)' : ''
+                    ));
                 } else {
                     if ('rate_limit' !== $this->openai->get_last_error_class()) {
                         $this->warn_generation_failure($attachment_id);

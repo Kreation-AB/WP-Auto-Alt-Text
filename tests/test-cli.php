@@ -51,8 +51,14 @@ namespace {
         public $calls = [];
         /** @var callable|null Runs before each generation, e.g. to simulate an editor working during the run. */
         public $on_generate = null;
+        /** @var bool What last_from_cache() reports after a generation. */
+        public $from_cache = false;
 
         public function __construct() {}
+
+        public function last_from_cache(): bool {
+            return $this->from_cache;
+        }
 
         /** @var array[] Every set_run_overrides() call, in order (the CLI resets to [] when a run ends). */
         public $run_overrides_seen = [];
@@ -684,6 +690,25 @@ namespace {
             Assert::assertFalse(get_option('wp_auto_alt_text_enable_brand_tonality'));
             Assert::assertContains('Naming: product', WP_CLI::$logs);
             Assert::assertContains('Model: gpt-6-luna', WP_CLI::$logs);
+        }
+
+        public function test_generate_passes_no_cache_as_a_run_override() {
+            $this->create_attachments(1);
+
+            $this->create_cli()->generate([], ['no-cache' => true]);
+
+            Assert::assertTrue($this->openai->run_overrides_seen[0]['no_cache']);
+            Assert::assertContains('Cache: skipped for this run (--no-cache)', WP_CLI::$logs);
+        }
+
+        public function test_generate_marks_results_served_from_the_cache() {
+            $this->create_attachments(1);
+            $this->openai->from_cache = true;
+
+            $this->create_cli()->generate([], []);
+
+            Assert::assertStringEndsWith(' (from cache)', WP_CLI::$successes[0]);
+            Assert::assertNotContains('Cache: skipped for this run (--no-cache)', WP_CLI::$logs);
         }
 
         public function test_generate_without_flags_passes_no_overrides() {
