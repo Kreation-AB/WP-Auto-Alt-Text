@@ -98,7 +98,10 @@ Alternatively, define the key in `wp-config.php`. It then takes precedence over 
 - Automatic throughput adaptation based on your OpenAI project limits
 - Names in alt text: `visible` (only names readable in the image; the default), `product` (always the product or variant name when the image belongs to one product) or `product_brand` (also the brand name). At the product levels the plugin checks the result and adds the name if the model left it out. Page and post titles are only context.
 - Extra instructions: free text appended to the plugin's prompt (max 1,000 characters). It can adjust style and content, but not the reply format.
-- Model: the OpenAI model, with an estimated cost per 1,000 images. Watermarking of AI-written text is an OpenAI account setting (Organization/Project settings → Data controls → Text provenance), not a plugin setting.
+- Model: the OpenAI model, with an estimated cost per 1,000 images. Watermarking of AI-written text is a setting on the OpenAI account that owns the key (Organization/Project settings → Data controls → Text provenance), not a plugin setting.
+- Key status: shows whether the key works and the model is available. It is checked on save only when the key or model changed (or the last result is about a day old), and "Kontrollera nu" re-checks on demand and clears a queue pause caused by a rejected key. A notice appears in the Media Library and on the plugin's screens when the key is rejected or the model is unavailable.
+- Cache: "Töm cache" discards cached answers on any host.
+- Feedback: when off, the dialog's "Förbättra" section is hidden and the server refuses feedback requests.
 - Processing preferences
 
 ### Advanced Options
@@ -155,6 +158,7 @@ Use WordPress application passwords or cookie authentication in production.
 For large libraries, use WP-CLI to generate alt text without browser timeouts:
 
 - `wp auto-alt-text generate` — Process all images that are missing alt text, newest first.
+- `wp auto-alt-text generate --no-cache` — Skip the answer cache for this run. Results served from the cache are marked "(from cache)".
 - `wp auto-alt-text generate --limit=500` — Process up to 500 newest matching images.
 - `wp auto-alt-text generate --limit=100` — Fill in missing alt text for the 100 newest images that lack it. Existing alt text is never overwritten unless you ask for it. Re-running continues with the next batch.
 - `wp auto-alt-text generate --overwrite=ai` — Also rewrite alt text the plugin generated earlier, as long as nobody has edited it. `--overwrite=all` rewrites everything, including text written by a person. Without `--overwrite`, the plugin's "overwrite" setting decides (default: only missing). `--skip-existing` still works as an alias for `--overwrite=missing`.

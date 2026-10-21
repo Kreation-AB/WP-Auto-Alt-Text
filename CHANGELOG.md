@@ -19,7 +19,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 #### Modell och kostnad
 
 - **Välj modell.** Inställningssidan visar de OpenAI-modeller pluginet stöder och ungefär vad 1 000 bilder kostar med varje. Standard är GPT-6.1 Sol, vald efter ett test på 31 bilder.
-- **Vattenmärkning av AI-text.** Under modellvalet förklarar inställningssidan hur du slår på OpenAI:s vattenmärkning av text i ditt OpenAI-konto (Data controls → Text provenance). Pluginet ändrar aldrig AI:ns text, förutom när det lägger till produktnamnet.
+- **Vattenmärkning av AI-text.** Under modellvalet förklarar inställningssidan att vattenmärkningen slås på i det OpenAI-konto som äger nyckeln (Data controls → Text provenance), inte i pluginet. Pluginet ändrar aldrig AI:ns text, förutom när det lägger till produktnamnet.
 
 #### Bakgrund och kö
 
@@ -36,6 +36,9 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 
 #### Inställningar och API-nyckel
 
+- **Ny inställningssida.** Inställningarna är ordnade i sex avsnitt: Anslutning, Språk, Namn och varumärke, Automatik, Cache och Feedback. En sidopanel sammanfattar alla inställningar och fungerar som flikar. Efter att du sparat hamnar du i samma avsnitt igen. Sidan fungerar även utan JavaScript.
+- **Nyckelstatus och "Kontrollera nu".** Inställningssidan visar om API-nyckeln fungerar och om modellen är tillgänglig. "Kontrollera nu" kontrollerar nyckeln på begäran och tar bort en paus i kön som orsakats av en avvisad nyckel. Avvisas nyckeln, eller är modellen inte tillgänglig, visas ett meddelande i mediebiblioteket och på pluginets sidor.
+- **"Töm cache".** En knapp som tömmer pluginets sparade svar. Den fungerar på alla servrar. I terminalen hoppar `wp auto-alt-text generate --no-cache` över cachen och resultat som kommer från den märks med "(from cache)".
 - **API-nyckeln kan ligga i wp-config.php.** Du kan ange OpenAI-nyckeln med `define('AUTO_ALT_TEXT_OPENAI_API_KEY', 'sk-…');` i stället för att spara den i inställningarna.
 - **Tydligt besked när WordPress AI blockerar pluginet.** Om WordPress AI-plugin inte har godkänt pluginets anslutning till OpenAI visas en förklaring och en länk för att godkänna den (Verktyg → AI connector approval), i stället för ett otydligt felmeddelande. Genereringen pausas tills anslutningen är godkänd.
 
@@ -55,6 +58,13 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 #### Bakgrund och kö
 
 - **Inställningen "Generera alt-texter automatiskt" gör nu bara det.** Den slår på eller av automatisk generering för nya uppladdningar och sparade produkter. Generera-knappen, massåtgärderna, WP-CLI och REST-API:t fungerar alltid, oavsett inställningen.
+
+#### Inställningar
+
+- **Inställningen Feedback gäller nu.** Är den avstängd visas inte Förbättra-delen i dialogen, och servern avvisar feedback.
+- **Sparade svar i cachen används inte efter uppdateringen.** Varje bild kan behöva genereras en gång till.
+- **Modellkontrollen vid sparande körs bara när nyckeln eller modellen har ändrats** (eller när det sparade resultatet är ungefär ett dygn gammalt), med högst 5 sekunders väntan.
+- **Etiketten "Standard" följer filtret `auto_alt_text_model`.**
 
 #### WooCommerce
 
