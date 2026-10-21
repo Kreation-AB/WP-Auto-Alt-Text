@@ -98,7 +98,9 @@ try {
             'max_length'   => Auto_Alt_Text_Prompt::DEFAULT_MAX_LENGTH,
         ]) : [];
         $aat_format = $aat_ok && aat_eval_format_ok($aat_checks);
-        $aat_name = $aat_ok && false !== ($aat_checks['name_first_ok'] ?? null);
+        // A product item with an empty target name would make the name checks "not applicable"; that must fail, not pass.
+        $aat_name_missing = !empty($aat_item['shop_name']) && '' === (string) ($aat_target['product_name'] ?? '');
+        $aat_name = $aat_ok && !$aat_name_missing && false !== ($aat_checks['name_first_ok'] ?? null);
         if (!$aat_ok || !$aat_format || !$aat_name) {
             $aat_failed = true;
         }

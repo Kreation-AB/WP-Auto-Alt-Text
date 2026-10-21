@@ -62,6 +62,8 @@ test.describe( 'media modal', () => {
 		await expect
 			.poll( async () => ( await requestUtils.rest( { path: `/wp/v2/media/${ media.id }` } ) ).alt_text )
 			.toBe( RESP_TEXT );
+		// The modal also writes the text into the attachment-details alt field (admin/js/app.js).
+		await expect( page.locator( '#attachment-details-two-column-alt-text' ) ).toHaveValue( RESP_TEXT );
 		// Apply records the text as written by the modal ('manual'), not by an upload job.
 		expect( provenance( media.id ).source ).toBe( 'manual' );
 	} );
