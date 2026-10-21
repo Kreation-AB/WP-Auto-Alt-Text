@@ -205,8 +205,8 @@ class Auto_Alt_Text_Settings_Page {
     }
 
     private static function render_notice(): void {
-        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only flag set by the clear-cache redirect.
-        if (isset($_GET['aat_notice']) && 'cache_cleared' === $_GET['aat_notice']) {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only flags. The form's referer keeps aat_notice, so a later save's page carries it too: show it once.
+        if (isset($_GET['aat_notice']) && 'cache_cleared' === $_GET['aat_notice'] && !isset($_GET['settings-updated'])) {
             printf('<div class="notice notice-success is-dismissible"><p>%s</p></div>', esc_html__('Cachen är tömd.', 'WP-Auto-Alt-Text'));
         }
     }

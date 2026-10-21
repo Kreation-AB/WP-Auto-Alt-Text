@@ -256,6 +256,19 @@ class Auto_Alt_Text_Settings_Page_Test extends WP_UnitTestCase {
         $this->assertLessThan(strpos($html, 'aat-settings-strip'), strpos($html, 'Cachen är tömd.'));
     }
 
+    public function test_cache_cleared_notice_shows_once() {
+        // Core drops it from the address bar (admin canonical URL)…
+        $this->assertTrue(in_array('aat_notice', wp_removable_query_args(), true));
+
+        // …but not from the form's referer, so the page after a save still carries it.
+        $_GET['aat_notice'] = 'cache_cleared';
+        $_GET['settings-updated'] = 'true';
+        $html = $this->render_settings_page();
+        unset($_GET['settings-updated']);
+
+        $this->assertStringNotContainsString('Cachen är tömd.', $html);
+    }
+
     public function test_settings_errors_print_above_the_strip() {
         $_GET['settings-updated'] = 'true';
         set_transient('settings_errors', [['setting' => 'general', 'code' => 'settings_updated', 'message' => 'Inställningarna sparades.', 'type' => 'success']], 30);

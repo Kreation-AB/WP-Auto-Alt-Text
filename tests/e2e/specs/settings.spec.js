@@ -16,6 +16,15 @@ async function save( page ) {
 	await redirected;
 }
 
+// After a save from a page reached by Töm cache, only the save's notice shows.
+async function expectNoCacheNoticeAfterSave( page ) {
+	await save( page );
+	// The page before the save had no settings notice, so this is the new page; then let it finish parsing.
+	await expect( page.locator( '.settings-error' ).first() ).toBeVisible();
+	await page.waitForLoadState( 'domcontentloaded' );
+	expect( await page.getByText( 'Cachen är tömd.' ).count() ).toBe( 0 );
+}
+
 async function openSection( page, slug ) {
 	await page.locator( '#aat-tab-' + slug ).click();
 	await expect( page.locator( '#aat-section-' + slug ) ).toBeVisible();
@@ -237,7 +246,15 @@ test.describe( 'settings page', () => {
 		await page.getByRole( 'button', { name: 'Töm cache' } ).click();
 		await expect( page.getByText( 'Cachen är tömd.' ) ).toBeVisible();
 		expect( page.url() ).toContain( 'section=cache' );
+		// Core's admin canonical URL drops the one-time flag from the address bar, and a tab switch does not bring it back.
+		expect( page.url() ).not.toContain( 'aat_notice' );
 		await expect( page.locator( '#aat-section-cache' ) ).toBeVisible();
+		await openSection( page, 'sprak' );
+		expect( page.url() ).not.toContain( 'aat_notice' );
+
+		await expectNoCacheNoticeAfterSave( page );
+		expect( page.url() ).toContain( 'section=sprak' );
+		await expect( page.locator( '#aat-section-sprak' ) ).toBeVisible();
 	} );
 
 	test( 'Kontrollera nu shows a working key', async ( { page } ) => {
@@ -312,6 +329,8 @@ test.describe( 'settings page', () => {
 
 			await page.getByRole( 'button', { name: 'Töm cache' } ).click();
 			await expect( page.getByText( 'Cachen är tömd.' ) ).toBeVisible();
+			// Without JS the flag stays in the URL and the form's referer; the save's page still must not repeat it.
+			await expectNoCacheNoticeAfterSave( page );
 
 			await page.getByRole( 'button', { name: 'Kontrollera nu' } ).click();
 			await expect( page.locator( '#aat-key-status' ) ).toContainText( 'Nyckeln fungerar' );

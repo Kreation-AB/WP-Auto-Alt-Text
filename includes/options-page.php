@@ -9,6 +9,15 @@ add_action('admin_init', 'auto_alt_text_register_settings');
 
 add_action('admin_enqueue_scripts', 'auto_alt_text_admin_styles');
 add_action('admin_enqueue_scripts', ['Auto_Alt_Text_Library_Page', 'enqueue']);
+add_filter('removable_query_args', 'auto_alt_text_removable_query_args');
+
+/**
+ * One-time flags that core drops from the address bar (the admin canonical URL).
+ * The form's referer keeps them, so the settings page also checks for a save.
+ */
+function auto_alt_text_removable_query_args($args) {
+    return array_merge((array) $args, ['aat_notice']);
+}
 
 /**
  * The settings page's stylesheet and admin/js/settings.js (tabs, live summary,
