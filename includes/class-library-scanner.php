@@ -67,31 +67,36 @@ class Auto_Alt_Text_Library_Scanner {
         return $counts;
     }
 
-    /** @return array{missing:int,ai:int,human:int,unsupported:int,max_id:int,updated_at:int,complete:bool,cursor:int} */
+    /**
+     * The last complete figures. A recount in flight never touches them; its
+     * progress lives in separate keys until it completes.
+     *
+     * @return array{missing:int,ai:int,human:int,unsupported:int,max_id:int,updated_at:int,complete:bool,cursor:int,recounting:bool}
+     */
     public static function cached_counts(): array {
-        $defaults = [
-            'missing' => 0, 'ai' => 0, 'human' => 0, 'unsupported' => 0,
-            'max_id' => 0, 'updated_at' => 0, 'complete' => false, 'cursor' => 0,
-        ];
-        $stored = get_option(self::COUNTS_OPTION, []);
-        $counts = array_merge($defaults, is_array($stored) ? $stored : []);
-        foreach (['missing', 'ai', 'human', 'unsupported', 'max_id', 'updated_at', 'cursor'] as $key) {
-            $counts[$key] = (int) $counts[$key];
+        $state = self::state();
+        $counts = [];
+        foreach (['missing', 'ai', 'human', 'unsupported', 'max_id', 'updated_at'] as $key) {
+            $counts[$key] = (int) ($state[$key] ?? 0);
         }
-        $counts['complete'] = (bool) $counts['complete'];
+        $counts['complete'] = !empty($state['complete']);
+        $counts['cursor'] = (int) ($state['cursor'] ?? 0);
+        $counts['recounting'] = self::in_flight($state);
         return $counts;
     }
 
-    /** Starts a fresh count: resets the cursor and schedules the background job. */
+    /** Starts a fresh count in the background. A no-op while one is already in flight. */
     public static function request_recount(): void {
-        $previous = self::cached_counts();
-        // Keep the old figures visible until the new count completes.
-        $previous['cursor'] = 0;
-        $previous['complete'] = false;
-        update_option(self::COUNTS_OPTION, $previous, false);
-        if (!wp_next_scheduled(self::RECOUNT_HOOK)) {
-            wp_schedule_single_event(time(), self::RECOUNT_HOOK);
+        $state = self::state();
+        if (self::in_flight($state)) {
+            self::reschedule();
+            return;
         }
+        unset($state['pending']);
+        $state['cursor'] = 0;
+        $state['backfill_cursor'] = 0;
+        update_option(self::COUNTS_OPTION, $state, false);
+        wp_schedule_single_event(time(), self::RECOUNT_HOOK);
     }
 
     /** Cron callback. */
@@ -100,16 +105,17 @@ class Auto_Alt_Text_Library_Scanner {
     }
 
     /**
-     * Does as much of the recount as fits in the budget.
+     * Does as much of the recount as fits in the budget (at least one chunk).
      *
      * @return bool True when the count is complete.
      */
     public static function recount_step(float $budget_seconds): bool {
         $deadline = microtime(true) + $budget_seconds;
+        $state = self::state();
 
         // 1. Make "ai" accurate for pre-2.0 text first.
         if (Auto_Alt_Text_Provenance::backfill_pending()) {
-            $after = self::backfill_cursor();
+            $after = (int) ($state['backfill_cursor'] ?? 0);
             $drained = false;
             do {
                 $after = Auto_Alt_Text_Provenance::backfill_batch($after, self::BACKFILL_CHUNK);
@@ -119,66 +125,65 @@ class Auto_Alt_Text_Library_Scanner {
                     break;
                 }
             } while (microtime(true) < $deadline);
+            $state['backfill_cursor'] = $drained ? 0 : $after;
+            update_option(self::COUNTS_OPTION, $state, false);
             if (!$drained) {
-                self::save_backfill_cursor($after);
                 self::reschedule();
                 return false;
             }
-            self::save_backfill_cursor(0);
         }
 
-        // 2. Count in chunks.
-        $state = get_option(self::COUNTS_OPTION, []);
-        $state = is_array($state) ? $state : [];
+        // 2. Count in chunks into the pending tally.
         $cursor = (int) ($state['cursor'] ?? 0);
-        $tally = isset($state['pending']) && is_array($state['pending']) && $cursor > 0
-            ? array_map('intval', $state['pending'] + ['missing' => 0, 'ai' => 0, 'human' => 0, 'unsupported' => 0])
-            : ['missing' => 0, 'ai' => 0, 'human' => 0, 'unsupported' => 0];
-        $max_id = $cursor > 0 ? (int) ($state['max_id'] ?? 0) : 0;
+        $zero = ['missing' => 0, 'ai' => 0, 'human' => 0, 'unsupported' => 0, 'max_id' => 0];
+        $pending = ($cursor > 0 && isset($state['pending']) && is_array($state['pending']))
+            ? array_map('intval', array_merge($zero, $state['pending']))
+            : $zero;
+        $chunk_size = max(1, (int) apply_filters('aat_library_recount_chunk', self::CHUNK));
 
         $done = false;
         do {
-            $chunk = self::count_chunk($cursor, self::CHUNK);
+            $chunk = self::count_chunk($cursor, $chunk_size);
             if (0 === $chunk['last_id']) {
                 $done = true;
                 break;
             }
             foreach (['missing', 'ai', 'human', 'unsupported'] as $key) {
-                $tally[$key] += $chunk[$key];
+                $pending[$key] += $chunk[$key];
             }
             $cursor = $chunk['last_id'];
-            $max_id = max($max_id, $cursor);
+            $pending['max_id'] = max($pending['max_id'], $cursor);
         } while (microtime(true) < $deadline);
 
         if ($done) {
-            $tally['max_id'] = $max_id;
-            $tally['updated_at'] = time();
-            $tally['complete'] = true;
-            $tally['cursor'] = 0;
-            update_option(self::COUNTS_OPTION, $tally, false);
+            $state = array_merge($state, $pending, ['updated_at' => time(), 'complete' => true, 'cursor' => 0, 'backfill_cursor' => 0]);
+            unset($state['pending']);
+            update_option(self::COUNTS_OPTION, $state, false);
+            wp_unschedule_hook(self::RECOUNT_HOOK);
             return true;
         }
 
-        update_option(self::COUNTS_OPTION, $tally + [
-            'max_id' => $max_id, 'updated_at' => (int) ($state['updated_at'] ?? 0),
-            'complete' => false, 'cursor' => $cursor,
-            'pending' => $tally,
-        ], false);
+        $state['pending'] = $pending;
+        $state['cursor'] = $cursor;
+        update_option(self::COUNTS_OPTION, $state, false);
         self::reschedule();
         return false;
+    }
+
+    private static function state(): array {
+        $state = get_option(self::COUNTS_OPTION, []);
+        return is_array($state) ? $state : [];
+    }
+
+    private static function in_flight(array $state): bool {
+        return (int) ($state['cursor'] ?? 0) > 0
+            || (int) ($state['backfill_cursor'] ?? 0) > 0
+            || false !== wp_next_scheduled(self::RECOUNT_HOOK);
     }
 
     private static function reschedule(): void {
         if (!wp_next_scheduled(self::RECOUNT_HOOK)) {
             wp_schedule_single_event(time() + self::RESCHEDULE_SECONDS, self::RECOUNT_HOOK);
         }
-    }
-
-    private static function backfill_cursor(): int {
-        return (int) get_option('aat_library_backfill_cursor', 0);
-    }
-
-    private static function save_backfill_cursor(int $after): void {
-        update_option('aat_library_backfill_cursor', $after, false);
     }
 }

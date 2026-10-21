@@ -68,6 +68,7 @@ class Auto_Alt_Text_Library_Scanner_Test extends WP_UnitTestCase {
             'generation_type' => 'upload',
             'generation_time' => '2026-01-01 10:00:00',
         ]);
+        $before_ai = $this->library_ai_count_excluding($id);
         wp_schedule_single_event(time() + 30, Auto_Alt_Text_Provenance::BACKFILL_HOOK, [0]);
         $this->assertTrue(Auto_Alt_Text_Provenance::backfill_pending());
 
@@ -77,13 +78,71 @@ class Auto_Alt_Text_Library_Scanner_Test extends WP_UnitTestCase {
         $this->assertFalse(Auto_Alt_Text_Provenance::backfill_pending());
         $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
         $this->assertTrue($counts['complete']);
-        $this->assertGreaterThanOrEqual(1, $counts['ai']);
+        $this->assertSame($before_ai + 1, $counts['ai']);
+        $this->assertFalse($counts['recounting']);
         $this->assertSame('ai', Auto_Alt_Text_Provenance::classify($id));
+    }
+
+    /** AI-classified images in the library, not counting $exclude. */
+    private function library_ai_count_excluding($exclude) {
+        $ai = 0;
+        $after = 0;
+        while (($chunk = Auto_Alt_Text_Library_Scanner::count_chunk($after, 500)) && $chunk['last_id'] > 0) {
+            $ai += $chunk['ai'];
+            $after = $chunk['last_id'];
+        }
+        return $ai + ('ai' === Auto_Alt_Text_Provenance::classify($exclude) ? -1 : 0);
+    }
+
+    public function test_partial_recount_keeps_the_last_complete_figures_and_resumes() {
+        $this->image();
+        $this->image();
+        $this->image();
+        Auto_Alt_Text_Library_Scanner::request_recount();
+        $this->assertTrue(Auto_Alt_Text_Library_Scanner::recount_step(5.0));
+        $complete = Auto_Alt_Text_Library_Scanner::cached_counts();
+        $this->assertTrue($complete['complete']);
+        $this->assertFalse($complete['recounting']);
+
+        $this->image();
+        $one = function () { return 1; };
+        add_filter('aat_library_recount_chunk', $one);
+        Auto_Alt_Text_Library_Scanner::request_recount();
+        $this->assertFalse(Auto_Alt_Text_Library_Scanner::recount_step(0.0));
+
+        $partial = Auto_Alt_Text_Library_Scanner::cached_counts();
+        $this->assertTrue($partial['recounting']);
+        $this->assertTrue($partial['complete']);
+        foreach (['missing', 'ai', 'human', 'unsupported', 'max_id', 'updated_at'] as $key) {
+            $this->assertSame($complete[$key], $partial[$key], $key);
+        }
+        $this->assertNotFalse(wp_next_scheduled('aat_library_recount'));
+
+        // A request mid-recount neither restarts nor double-schedules.
+        Auto_Alt_Text_Library_Scanner::request_recount();
+        $this->assertSame($partial['cursor'], Auto_Alt_Text_Library_Scanner::cached_counts()['cursor']);
+
+        $this->assertTrue(Auto_Alt_Text_Library_Scanner::recount_step(60.0));
+        remove_filter('aat_library_recount_chunk', $one);
+        $after = Auto_Alt_Text_Library_Scanner::cached_counts();
+        $this->assertFalse($after['recounting']);
+        $this->assertSame($complete['missing'] + 1, $after['missing']);
+    }
+
+    public function test_request_recount_twice_schedules_one_event() {
+        Auto_Alt_Text_Library_Scanner::request_recount();
+        Auto_Alt_Text_Library_Scanner::request_recount();
+        $found = 0;
+        foreach ((array) _get_cron_array() as $events) {
+            $found += count($events['aat_library_recount'] ?? []);
+        }
+        $this->assertSame(1, $found);
     }
 
     public function test_cached_counts_default_to_zero_and_incomplete() {
         $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
         $this->assertFalse($counts['complete']);
+        $this->assertFalse($counts['recounting']);
         $this->assertSame(0, $counts['missing']);
         $this->assertSame(0, $counts['cursor']);
     }
