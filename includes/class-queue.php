@@ -31,6 +31,9 @@ class Auto_Alt_Text_Queue {
     /** Set by a batch that hit a quota, auth or rate-limit stop. */
     private bool $halted = false;
 
+    /** @var callable|null Called after every job and batch of a budgeted run. */
+    private $after_batch = null;
+
     /**
      * @param callable|null $processor Overridable job processor for testing.
      *                                 Signature: fn(int $attachment_id, string $generation_type, ?int $context_post_id): array
@@ -222,6 +225,7 @@ class Auto_Alt_Text_Queue {
         if (null !== $run) {
             Auto_Alt_Text_Library_Run::feed((int) apply_filters('aat_library_feed_window', 20));
         }
+        $this->after_batch = $after_batch;
         $deadline = null !== $time_budget ? microtime(true) + $time_budget : null;
         $total = 0;
         if ($this->start_tick()) {
@@ -298,7 +302,11 @@ class Auto_Alt_Text_Queue {
             // regardless of outcome (process_job() always finalizes or reschedules it).
             $unprocessed_ids = array_diff($unprocessed_ids, [$job->id]);
             $processed++;
-            if (!$this->process_job($job)) {
+            $continue = $this->process_job($job);
+            if (null !== $this->after_batch) {
+                call_user_func($this->after_batch);
+            }
+            if (!$continue) {
                 $this->halted = true;
                 break; // quota or rate-limit stop: remaining claimed jobs are released below.
             }

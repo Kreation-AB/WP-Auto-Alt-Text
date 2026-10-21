@@ -117,11 +117,26 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         $this->assertFalse(Auto_Alt_Text_Library_Runner::lock_held());
     }
 
-    public function test_an_idle_tick_waits_before_it_chains() {
+    /** Backs the only pending job off by the given seconds. */
+    private function back_off_pending(int $seconds): void {
+        global $wpdb;
+        $wpdb->query($wpdb->prepare(
+            'UPDATE ' . Auto_Alt_Text_Queue::get_table_name() . ' SET next_attempt_at = %s WHERE status = %s',
+            gmdate('Y-m-d H:i:s', time() + $seconds), 'pending'
+        ));
+    }
+
+    /** A run whose only job waits in backoff, so a tick processes nothing. */
+    private function start_backed_off_run(int $seconds): array {
         self::factory()->attachment->create(['post_mime_type' => 'image/jpeg']);
-        $this->start_run();
-        // One failed attempt leaves the only job in backoff: nothing is due.
+        $run = $this->start_run();
         $this->assertSame(1, (new Auto_Alt_Text_Queue(fn() => ['status' => 'retry', 'error' => 'x']))->run(5.0));
+        $this->back_off_pending($seconds);
+        return $run;
+    }
+
+    /** @return array{0:?float,1:int} The idle wait seen (null if none) and the chains sent after it. */
+    private function tick_and_observe(): array {
         $log = [];
         add_filter('aat_library_idle_wait', function ($wait) use (&$log) {
             $log[] = ['wait', $wait];
@@ -134,13 +149,56 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         $_POST['token'] = Auto_Alt_Text_Library_Runner::token();
         try {
             Auto_Alt_Text_Library_Runner::handle_tick_request();
+            $this->fail('Expected wp_die');
         } catch (WPDieException $e) {
             $this->assertSame(204, $e->getCode());
         }
-        $this->assertSame('wait', $log[0][0]);
-        $this->assertGreaterThanOrEqual(1.0, $log[0][1]);
-        $this->assertLessThanOrEqual(20.0, $log[0][1]);
-        $this->assertSame(['chain'], $log[1] ?? null);
+        $this->assertSame('wait', $log[0][0] ?? null);
+        return [$log[0][1] ?? null, count($log) - 1];
+    }
+
+    public function test_an_idle_tick_waits_before_it_chains() {
+        $this->start_backed_off_run(30);
+        [$wait, $chains] = $this->tick_and_observe();
+        $this->assertSame(20.0, $wait);
+        $this->assertSame(1, $chains);
+    }
+
+    public function test_the_idle_wait_ignores_due_rows_the_queue_cannot_claim() {
+        $this->start_backed_off_run(30);
+        // A due upload job that auto-generate being off keeps unclaimable.
+        update_option('auto_alt_text_auto_generate', 0);
+        $id = self::factory()->attachment->create(['post_mime_type' => 'image/jpeg']);
+        (new Auto_Alt_Text_Queue())->enqueue($id, 'upload');
+        [$wait] = $this->tick_and_observe();
+        $this->assertSame(20.0, $wait);
+    }
+
+    public function test_a_long_backoff_is_left_to_the_cron_tick() {
+        $run = $this->start_backed_off_run(2 * HOUR_IN_SECONDS);
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::maybe_chain());
+        $this->assertSame([], $this->requests);
+
+        $this->set_tick($run['id'], gmdate('Y-m-d H:i:s', time() - 11 * MINUTE_IN_SECONDS));
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::health(Auto_Alt_Text_Library_Run::get($run['id']))['stalled']);
+
+        $this->back_off_pending(-5);
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::health(Auto_Alt_Text_Library_Run::get($run['id']))['stalled']);
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::maybe_chain());
+    }
+
+    public function test_a_garbage_lock_value_does_not_hold_the_lock() {
+        update_option('aat_library_runner_lock', 'garbage', false);
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::lock_held());
+        $this->assertNotNull(Auto_Alt_Text_Library_Runner::take_lock());
+    }
+
+    public function test_resuming_a_run_stamps_its_tick() {
+        $run = $this->start_run();
+        Auto_Alt_Text_Library_Run::pause($run['id']);
+        $this->assertNull(Auto_Alt_Text_Library_Run::get($run['id'])['last_tick_at']);
+        Auto_Alt_Text_Library_Run::resume($run['id']);
+        $this->assertNotNull(Auto_Alt_Text_Library_Run::get($run['id'])['last_tick_at']);
     }
 
     public function test_maybe_chain_needs_an_api_key_and_an_array_token_is_rejected() {

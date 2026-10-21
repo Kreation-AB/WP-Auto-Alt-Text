@@ -12,6 +12,7 @@ class Auto_Alt_Text_Library_Runner {
     public const LOCK_OPTION  = 'aat_library_runner_lock';
     private const LOCK_SECONDS = 120;
     private const EXTRA_TIME_LIMIT = 30;
+    private const CHAIN_MAX_BACKOFF = 60;
 
     /** The shared secret of the loopback request; created on first use. */
     public static function token(): string {
@@ -53,7 +54,7 @@ class Auto_Alt_Text_Library_Runner {
             // Takeover of an expired lock, in one conditional statement.
             // phpcs:ignore WordPress.DB.DirectDatabaseQuery
             $taken = 1 === (int) $wpdb->query($wpdb->prepare(
-                "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value < %s",
+                "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND (option_value < %s OR option_value NOT REGEXP '^[0-9]{10}[|]')",
                 $value, self::LOCK_OPTION, sprintf('%010d|', time())
             ));
         }
@@ -86,7 +87,8 @@ class Auto_Alt_Text_Library_Runner {
         $value = $wpdb->get_var($wpdb->prepare(
             "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", self::LOCK_OPTION
         ));
-        return null !== $value && $value >= sprintf('%010d|', time());
+        // A value without a 10-digit expiry is garbage and counts as stale.
+        return null !== $value && 1 === preg_match('/^\d{10}\|/', (string) $value) && $value >= sprintf('%010d|', time());
     }
 
     private static function lock_value(string $owner): string {
@@ -122,8 +124,9 @@ class Auto_Alt_Text_Library_Runner {
             $processed = (new Auto_Alt_Text_Queue())->run($budget, static function () use ($owner): void {
                 self::refresh_lock($owner);
             });
-            if ($wait_when_idle && 0 === $processed) {
-                self::idle_wait(max(0.0, $budget - (microtime(true) - $started)));
+            $run = $wait_when_idle && 0 === $processed ? Auto_Alt_Text_Library_Run::active() : null;
+            if (null !== $run) {
+                self::idle_wait(max(0.0, $budget - (microtime(true) - $started)), $run['id']);
             }
         } finally {
             self::release_lock($owner);
@@ -131,21 +134,46 @@ class Auto_Alt_Text_Library_Runner {
         return $processed;
     }
 
-    /** Seconds until something is due again, at least 1, at most 20 and the remaining budget. */
-    private static function idle_wait(float $remaining): void {
+    /**
+     * Pending rows the queue could claim now or later, scoped like
+     * Queue::claim_batch(): non-run rows (minus the auto types while
+     * auto-generate is off) and the given run's rows.
+     *
+     * @return array{due:int,next:?int} Count already due, and the earliest future due time.
+     */
+    private static function claimable_state(int $run_id): array {
         global $wpdb;
-        $delay = (new Auto_Alt_Text_Rate_Limiter())->get_recommended_delay();
-        // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared -- Internal table name only.
-        $next = $wpdb->get_var($wpdb->prepare(
-            'SELECT MIN(next_attempt_at) FROM ' . Auto_Alt_Text_Queue::get_table_name() . ' WHERE status = %s',
-            Auto_Alt_Text_Queue::STATUS_PENDING
+        $now = current_time('mysql', true);
+        $params = [$now, $now, Auto_Alt_Text_Queue::STATUS_PENDING];
+        $type_clause = '';
+        if (!get_option('auto_alt_text_auto_generate', true)) {
+            $types = Auto_Alt_Text_Queue::AUTO_GENERATION_TYPES;
+            $type_clause = ' AND generation_type NOT IN (' . implode(',', array_fill(0, count($types), '%s')) . ')';
+            $params = array_merge($params, $types);
+        }
+        $params[] = $run_id;
+        // phpcs:disable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and generated placeholders only.
+        $row = $wpdb->get_row($wpdb->prepare(
+            'SELECT COALESCE(SUM(next_attempt_at <= %s), 0) AS due, MIN(CASE WHEN next_attempt_at > %s THEN next_attempt_at END) AS next
+             FROM ' . Auto_Alt_Text_Queue::get_table_name() . " WHERE status = %s AND ((run_id IS NULL{$type_clause}) OR run_id = %d)",
+            $params
         ));
-        // phpcs:enable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
+        // phpcs:enable WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+        return [
+            'due'  => $row ? (int) $row->due : 0,
+            'next' => ($row && null !== $row->next) ? (int) strtotime($row->next . ' UTC') : null,
+        ];
+    }
+
+    /** Waits 1-20 s (and no longer than the remaining budget) until a claimable job is due. */
+    private static function idle_wait(float $remaining, int $run_id): void {
+        $delay = (new Auto_Alt_Text_Rate_Limiter())->get_recommended_delay();
+        $next = self::claimable_state($run_id)['next'];
         if (null !== $next) {
-            $delay = max($delay, (int) strtotime($next . ' UTC') - time());
+            $delay = max($delay, $next - time());
         }
         $wait = max(1.0, min($remaining, (float) $delay, 20.0));
-        $wait = (float) apply_filters('aat_library_idle_wait', $wait);
+        $wait = max(0.0, (float) apply_filters('aat_library_idle_wait', $wait));
         if ($wait > 0) {
             usleep((int) round($wait * 1000000));
         }
@@ -167,6 +195,11 @@ class Auto_Alt_Text_Library_Runner {
             return false;
         }
         if (!Auto_Alt_Text_Queue::has_api_key() || self::lock_held()) {
+            return false;
+        }
+        // Only long backoffs left: the minutely cron tick restarts the chain.
+        $state = self::claimable_state($run['id']);
+        if (0 === $state['due'] && null !== $state['next'] && $state['next'] - time() > self::CHAIN_MAX_BACKOFF) {
             return false;
         }
         $url = admin_url('admin-post.php');
@@ -207,7 +240,13 @@ class Auto_Alt_Text_Library_Runner {
         if ('running' === Auto_Alt_Text_Library_Run::display_state($run)['state']) {
             $since = $run['last_tick_at'] ?? $run['started_at'] ?? null;
             $threshold = (int) apply_filters('aat_library_stall_seconds', 600);
-            $stalled = empty($since) || (time() - (int) strtotime($since . ' UTC')) > $threshold;
+            $quiet = empty($since) || (time() - (int) strtotime($since . ' UTC')) > $threshold;
+            if ($quiet) {
+                // Waiting out a backoff is not a stall: a claimable job must be
+                // due, or the run must have nothing pending at all.
+                $state = self::claimable_state((int) $run['id']);
+                $stalled = $state['due'] > 0 || null === $state['next'];
+            }
         }
         return [
             'stalled'       => $stalled,

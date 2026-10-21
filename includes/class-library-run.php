@@ -145,6 +145,7 @@ class Auto_Alt_Text_Library_Run {
             return false;
         }
         self::note_event($id, 'resume');
+        self::touch_tick($id);
         do_action('aat_library_run_resumed', self::get($id));
         return true;
     }
@@ -531,6 +532,7 @@ class Auto_Alt_Text_Library_Run {
             // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
         }
         self::note_event($id, 'resume', 'retry');
+        self::touch_tick($id);
         do_action('aat_library_run_resumed', self::get($id));
         return $count;
     }
