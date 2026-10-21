@@ -186,6 +186,42 @@ For reliable background processing we strongly recommend real server cron instea
 
 Inspect the queue at any time with `wp auto-alt-text queue` (add `--status=failed` to see errors, `--retry-failed` to re-queue failed jobs), or in the plugin's statistics page in wp-admin.
 
+## Whole Library ("Hela biblioteket")
+
+Admin page under Auto Alt Text → Hela biblioteket (`manage_options` only, as are its REST routes and the report download). It generates alt text for every image in the Media Library in one background run, using the same queue as automatic generation. The library is counted in chunks and the counts are cached; the settings page shows a status card with the cached count of images missing alt text and the state of the latest run.
+
+- **Coverage.** "Missing" fills images without alt text. "Missing and unedited AI text" also regenerates alt text the plugin wrote that nobody has edited. Human-written alt text is never touched, and there is no "overwrite everything" option. Unsupported image formats are listed as failures, not retried.
+- **Cost.** The start dialog shows the estimated cost for the chosen model before you confirm, and the page shows the cost so far while the run is going.
+- **Controls.** One run at a time: pause, resume, cancel, and retry the failed images. Uploads made during a run are not held up by it.
+- **Report.** A plain-text download with counts, failures, pauses, versions and the run's warning and error log lines. It never contains the API key, key-like strings or alt texts.
+
+### Runner
+
+With the page open or not, a run is kept going by loopback chaining: each tick processes the queue for a time budget, then fires a non-blocking request to `admin-post.php` (authenticated by a stored token) that runs the next tick. WP-Cron's minutely event restarts the chain if it stops. Only one runner works at a time. Pauses for quota and rejected API key are not stored; they are derived from the live signals and the run continues by itself when they clear.
+
+If no tick has run for 10 minutes while work is due, the page shows a stall warning. Loopback requests are often blocked by basic auth, firewalls or local DNS; for a reliable run, and when `DISABLE_WP_CRON` is set, add a system cron entry as described under Background Processing:
+
+    * * * * * cd /path/to/site && wp cron event run --due-now >/dev/null 2>&1
+
+### Actions
+
+- `aat_library_run_started( array $run )`: a run was created.
+- `aat_library_run_paused( array $run, string $reason )`: the user paused. `$reason` is always `'user'`; quota and auth stops are derived states and fire no action.
+- `aat_library_run_resumed( array $run )`: the user resumed, or the failed images were retried.
+- `aat_library_run_cancelled( array $run )`: the user cancelled, or a reopened (retried) run was closed again.
+- `aat_library_run_finished( array $run )`: every image was processed.
+
+`$run` is the run row as an array (`id`, `status`, `coverage`, `summary` and so on).
+
+### Library filters
+
+- `aat_queue_time_budget`: seconds one tick may spend processing (default `25.0`).
+- `aat_library_feed_window`: how many images the run keeps queued ahead of the runner (default `20`).
+- `aat_library_stall_seconds`: quiet time before the stall warning (default `600`).
+- `aat_library_recount_chunk`: attachments per recount step (default `500`).
+- `aat_library_idle_wait`: seconds an idle tick waits before the next (1 to 20, computed from the next due job).
+- `aat_library_loopback_args`: arguments (`array $args, string $url`) of the loopback `wp_remote_post()`, for example to add basic auth headers.
+
 ## WooCommerce
 
 Product images are queued in two ways only: when a product (or a variation) is saved in wp-admin, which queues images without alt text, and from the Products list with the bulk action "Generate Alt Texts", which follows the overwrite setting and runs even when automatic generation is turned off. Nothing is queued at checkout, on stock updates or from front-end requests, and no OpenAI call is made while a shop page renders.

@@ -27,6 +27,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - **Hantering av slut på krediter.** Om din OpenAI-kredit tar slut pausas genereringen. Webbplatsens administratör får ett mejl och ett meddelande i adminpanelen. Genereringen fortsätter av sig själv när krediten fyllts på, och inga köade bilder går förlorade.
 - **Överblick över kön.** Statistiksidan visar hur många bilder som väntar, bearbetas, är klara eller har misslyckats. I terminalen visar `wp auto-alt-text queue` kön, `--status=failed` listar felen och `--retry-failed` försöker igen med de misslyckade bilderna.
 - **Automatisk rensning av loggen.** Loggposter äldre än 30 dagar raderas en gång per dag.
+- **Hela biblioteket.** Generera alt-text för alla bilder som saknar det i en bakgrundskörning med uppskattad kostnad, paus/fortsätt/avbryt, felrapport och statuskort på inställningssidan.
 
 #### WooCommerce
 
