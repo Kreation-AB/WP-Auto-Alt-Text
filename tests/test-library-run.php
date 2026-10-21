@@ -16,6 +16,7 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
         delete_option(Auto_Alt_Text_Quota_Monitor::OPTION);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);
         delete_option('aat_library_counts');
+        delete_option('aat_library_start_lock');
         wp_unschedule_hook(Auto_Alt_Text_Library_Scanner::RECOUNT_HOOK);
         parent::tearDown();
     }
@@ -50,6 +51,7 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
     }
 
     public function test_start_stores_total_estimate_and_fires_the_action() {
+        $before = did_action('aat_library_run_started');
         $run = $this->start('missing');
         $this->assertSame(10, $run['total']);
         $this->assertSame(
@@ -58,7 +60,7 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
         );
         $this->assertSame('running', $run['status']);
         $this->assertSame(500, $run['max_attachment_id']);
-        $this->assertSame(1, did_action('aat_library_run_started'));
+        $this->assertSame(1, did_action('aat_library_run_started') - $before);
 
         Auto_Alt_Text_Library_Run::cancel($run['id']);
         $second = $this->start('missing_ai');
@@ -85,6 +87,14 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
     }
 
     public function test_pause_resume_cancel_fire_actions_and_record_events() {
+        $before = [];
+        foreach (['paused', 'resumed', 'cancelled'] as $name) {
+            $before[$name] = did_action("aat_library_run_{$name}");
+        }
+        $pause_args = null;
+        add_action('aat_library_run_paused', static function ($run, $reason) use (&$pause_args) {
+            $pause_args = [$run['status'], $reason];
+        }, 10, 2);
         $run = $this->start();
         $id = $run['id'];
         $this->queue_row($id, 'pending');
@@ -97,10 +107,11 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
         $this->assertSame('running', Auto_Alt_Text_Library_Run::get($id)['status']);
         $this->assertTrue(Auto_Alt_Text_Library_Run::cancel($id));
 
-        $this->assertSame(1, did_action('aat_library_run_paused'));
-        $this->assertSame(1, did_action('aat_library_run_resumed'));
-        $this->assertSame(1, did_action('aat_library_run_cancelled'));
+        $this->assertSame(1, did_action('aat_library_run_paused') - $before['paused']);
+        $this->assertSame(1, did_action('aat_library_run_resumed') - $before['resumed']);
+        $this->assertSame(1, did_action('aat_library_run_cancelled') - $before['cancelled']);
 
+        $this->assertSame(['paused', 'user'], $pause_args);
         $final = Auto_Alt_Text_Library_Run::get($id);
         $this->assertSame('cancelled', $final['status']);
         $this->assertNotEmpty($final['ended_at']);
@@ -147,6 +158,7 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
 
     public function test_progress_and_finalize_copy_totals_and_failures() {
         global $wpdb;
+        $before = did_action('aat_library_run_finished');
         $id = $this->start()['id'];
         $wpdb->update(Auto_Alt_Text_Activator::get_runs_table_name(), ['skipped_at_feed' => 1], ['id' => $id]);
         $this->queue_row($id, 'done');
@@ -165,7 +177,7 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
         $this->assertSame('finished', $run['status']);
         $this->assertSame('Boom', $run['summary']['failures'][0]['reason']);
         $this->assertSame($file, $run['summary']['failures'][0]['file']);
-        $this->assertSame(1, did_action('aat_library_run_finished'));
+        $this->assertSame(1, did_action('aat_library_run_finished') - $before);
 
         $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Queue::get_table_name());
         $this->assertSame($expected, Auto_Alt_Text_Library_Run::progress(Auto_Alt_Text_Library_Run::get($id)));
@@ -187,6 +199,7 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
 
     public function test_retry_failed_requeues_all_but_unsupported_formats() {
         global $wpdb;
+        $before = did_action('aat_library_run_resumed');
         $id = $this->start()['id'];
         $this->queue_row($id, 'failed', 'Boom');
         $unsupported = $this->queue_row($id, 'failed', 'Bildformatet stöds inte.');
@@ -196,9 +209,100 @@ class Auto_Alt_Text_Library_Run_Test extends WP_UnitTestCase {
         $run = Auto_Alt_Text_Library_Run::get($id);
         $this->assertSame('running', $run['status']);
         $this->assertNull($run['ended_at']);
-        $this->assertSame(1, did_action('aat_library_run_resumed'));
+        $this->assertSame(1, did_action('aat_library_run_resumed') - $before);
         $this->assertSame('failed', $wpdb->get_var($wpdb->prepare(
             'SELECT status FROM ' . Auto_Alt_Text_Queue::get_table_name() . ' WHERE id = %d', $unsupported
         )));
+    }
+
+    public function test_finalize_twice_fires_once_and_keeps_failures() {
+        global $wpdb;
+        $id = $this->start()['id'];
+        $this->queue_row($id, 'failed', 'Boom');
+        $before = did_action('aat_library_run_finished');
+
+        Auto_Alt_Text_Library_Run::finalize($id, Auto_Alt_Text_Library_Run::STATUS_FINISHED);
+        $first = Auto_Alt_Text_Library_Run::get($id);
+        $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Queue::get_table_name());
+        Auto_Alt_Text_Library_Run::finalize($id, Auto_Alt_Text_Library_Run::STATUS_FINISHED);
+
+        $this->assertSame(1, did_action('aat_library_run_finished') - $before);
+        $this->assertSame($first['summary']['failures'], Auto_Alt_Text_Library_Run::get($id)['summary']['failures']);
+        $this->assertCount(1, $first['summary']['failures']);
+        $this->assertFalse(Auto_Alt_Text_Library_Run::cancel($id));
+    }
+
+    public function test_retry_failed_refuses_unknown_active_and_nothing_retryable() {
+        $this->assertSame(0, Auto_Alt_Text_Library_Run::retry_failed(999999));
+
+        // Still active: not finished or cancelled.
+        $id = $this->start()['id'];
+        $this->queue_row($id, 'failed', 'Boom');
+        $this->assertSame(0, Auto_Alt_Text_Library_Run::retry_failed($id));
+        $this->assertSame('running', Auto_Alt_Text_Library_Run::get($id)['status']);
+
+        // Finished, but another run is active.
+        Auto_Alt_Text_Library_Run::finalize($id, Auto_Alt_Text_Library_Run::STATUS_FINISHED);
+        $other = $this->start()['id'];
+        $resumed = did_action('aat_library_run_resumed');
+        $this->assertSame(0, Auto_Alt_Text_Library_Run::retry_failed($id));
+        $this->assertSame('finished', Auto_Alt_Text_Library_Run::get($id)['status']);
+        $this->assertSame($resumed, did_action('aat_library_run_resumed'));
+        Auto_Alt_Text_Library_Run::cancel($other);
+
+        // Finished with only unsupported failures: nothing to retry, status untouched.
+        $third = $this->start()['id'];
+        $this->queue_row($third, 'failed', 'Bildformatet stöds inte.');
+        Auto_Alt_Text_Library_Run::finalize($third, Auto_Alt_Text_Library_Run::STATUS_FINISHED);
+        $this->assertSame(0, Auto_Alt_Text_Library_Run::retry_failed($third));
+        $this->assertSame('finished', Auto_Alt_Text_Library_Run::get($third)['status']);
+        $this->assertSame($resumed, did_action('aat_library_run_resumed'));
+    }
+
+    public function test_start_respects_a_fresh_lock_and_takes_over_a_stale_one() {
+        update_option('aat_library_start_lock', time(), false);
+        $e = Auto_Alt_Text_Library_Run::start('missing', 1);
+        $this->assertWPError($e);
+        $this->assertSame('aat_library_run_active', $e->get_error_code());
+        $this->assertNotFalse(get_option('aat_library_start_lock'));
+
+        update_option('aat_library_start_lock', time() - 60, false);
+        $this->assertIsArray(Auto_Alt_Text_Library_Run::start('missing', 1));
+        $this->assertFalse(get_option('aat_library_start_lock'));
+    }
+
+    public function test_finalize_caps_the_failures_list() {
+        global $wpdb;
+        $id = $this->start()['id'];
+        $table = Auto_Alt_Text_Queue::get_table_name();
+        $now = gmdate('Y-m-d H:i:s');
+        for ($i = 0; $i < 502; $i++) {
+            $wpdb->insert($table, [
+                'attachment_id' => 100000 + $i, 'generation_type' => 'library', 'status' => 'failed',
+                'last_error' => 'E', 'run_id' => $id, 'next_attempt_at' => $now, 'created_at' => $now, 'updated_at' => $now,
+            ]);
+        }
+        Auto_Alt_Text_Library_Run::finalize($id, Auto_Alt_Text_Library_Run::STATUS_FINISHED);
+        $summary = Auto_Alt_Text_Library_Run::get($id)['summary'];
+        $this->assertCount(500, $summary['failures']);
+        $this->assertTrue($summary['failures_truncated']);
+        $this->assertSame(502, $summary['failed']);
+    }
+
+    public function test_cost_so_far_skips_unknown_models_and_null_tokens_and_other_runs() {
+        global $wpdb;
+        $id = $this->start()['id'];
+        $table = $wpdb->prefix . 'auto_alt_text_stats';
+        $row = static fn(?string $model, ?int $in, ?int $out, ?int $run) => [
+            'image_id' => 1, 'user_id' => 1, 'generated_text' => 'x', 'tokens_used' => 0,
+            'generation_type' => 'library', 'generation_time' => gmdate('Y-m-d H:i:s'),
+            'model' => $model, 'input_tokens' => $in, 'output_tokens' => $out, 'run_id' => $run,
+        ];
+        $wpdb->insert($table, $row('gpt-6.1-sol', 1300, 60, $id));
+        $wpdb->insert($table, $row('no-such-model', 999999, 999999, $id));
+        $wpdb->insert($table, $row('gpt-6.1-sol', null, null, $id));
+        $wpdb->insert($table, $row('gpt-6.1-sol', 1300, 60, $id + 1000));
+        $wpdb->insert($table, $row(null, 1300, 60, $id));
+        $this->assertEqualsWithDelta(0.0032, Auto_Alt_Text_Library_Run::cost_so_far($id), 0.00001);
     }
 }
