@@ -57,8 +57,8 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
      * [--model=<id>]
      * : OpenAI model for this run, e.g. `gpt-6-luna`. Default: the plugin setting.
      *
-     * [--no-cache]
-     * : Skip cached answers for this run; fresh results are still cached.
+     * [--cache]
+     * : Use cached answers (default). `--no-cache` skips them for this run; fresh results are still cached.
      *
      * ### Examples
      *
@@ -93,7 +93,8 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
         $model_override = $this->resolve_model($assoc_args);
         $naming = Auto_Alt_Text_Prompt::naming($naming_override);
         $model = $model_override ?? Auto_Alt_Text_Models::current_id();
-        $no_cache = isset($assoc_args['no-cache']);
+        // WP-CLI parses --no-cache as ['cache' => false]; only the declared [--cache] flag lets it through.
+        $no_cache = false === ($assoc_args['cache'] ?? true);
 
         $this->validate_generate_batch_arguments($assoc_args);
 
@@ -124,6 +125,7 @@ class Auto_Alt_Text_CLI implements Auto_Alt_Text_CLI_Command {
             if ($no_cache) {
                 $run_lines[] = 'Cache: skipped for this run (--no-cache)';
             }
+            // One log call for all run lines keeps the PHPStan baseline's WP_CLI::log count fixed.
             foreach ($run_lines as $run_line) {
                 WP_CLI::log($run_line);
             }

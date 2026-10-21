@@ -695,10 +695,31 @@ namespace {
         public function test_generate_passes_no_cache_as_a_run_override() {
             $this->create_attachments(1);
 
-            $this->create_cli()->generate([], ['no-cache' => true]);
+            // WP-CLI's parser turns --no-cache into ['cache' => false].
+            $this->create_cli()->generate([], ['cache' => false]);
 
             Assert::assertTrue($this->openai->run_overrides_seen[0]['no_cache']);
             Assert::assertContains('Cache: skipped for this run (--no-cache)', WP_CLI::$logs);
+        }
+
+        public function test_generate_with_cache_uses_the_cache() {
+            $this->create_attachments(1);
+
+            $this->create_cli()->generate([], ['cache' => true]);
+
+            Assert::assertSame([], $this->openai->run_overrides_seen[0]);
+            Assert::assertNotContains('Cache: skipped for this run (--no-cache)', WP_CLI::$logs);
+        }
+
+        public function test_generate_synopsis_declares_cache_so_no_cache_parses() {
+            // WP-CLI builds the synopsis from each docblock line followed by a ": " line, and rejects
+            // --no-cache as an unknown --cache parameter unless [--cache] is declared.
+            $doc = (string) (new \ReflectionMethod(\Auto_Alt_Text_CLI::class, 'generate'))->getDocComment();
+            $longdesc = preg_replace('/^\s*\/?\*+\/?\s?/m', '', $doc);
+            preg_match_all('/(.+?)[\r\n]+:/', $longdesc, $matches);
+
+            Assert::assertContains('[--cache]', $matches[1]);
+            Assert::assertNotContains('[--no-cache]', $matches[1]);
         }
 
         public function test_generate_marks_results_served_from_the_cache() {
