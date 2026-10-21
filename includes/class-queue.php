@@ -434,6 +434,9 @@ class Auto_Alt_Text_Queue {
         // run's coverage and never touch an unsupported format. Checked at
         // claim time, so an edit or a setting change made while the job
         // waited is respected: text a person wrote is never overwritten.
+        // An edit saved in another request never clears this request's meta
+        // cache (feed() and earlier jobs fill it), so read the meta fresh.
+        wp_cache_delete($attachment_id, 'post_meta');
         if (null !== $run) {
             if (!Auto_Alt_Text_Library_Scanner::is_candidate($attachment_id, $run['coverage'])) {
                 $this->finish($job, self::STATUS_SKIPPED);

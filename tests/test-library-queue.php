@@ -535,4 +535,74 @@ class Auto_Alt_Text_Library_Queue_Test extends WP_UnitTestCase {
         $this->assertSame('skipped', $this->row_status($id));
         $this->assertSame(1, Auto_Alt_Text_Library_Run::get($run['id'])['summary']['skipped']);
     }
+
+    /**
+     * An editor's save in another request never clears this request's meta
+     * cache. A direct row insert stands in for it: update_post_meta() here
+     * would clear the cache and hide the problem.
+     */
+    private function write_alt_in_another_request(int $id, string $alt): void {
+        global $wpdb;
+        $wpdb->insert($wpdb->postmeta, ['post_id' => $id, 'meta_key' => '_wp_attachment_image_alt', 'meta_value' => $alt]);
+    }
+
+    /** The alt text in the database, past any cache. */
+    private function stored_alt(int $id): ?string {
+        global $wpdb;
+        return $wpdb->get_var($wpdb->prepare(
+            "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = %s ORDER BY meta_id DESC LIMIT 1",
+            $id, '_wp_attachment_image_alt'
+        ));
+    }
+
+    /** Answers OpenAI calls with a fixed text; $during runs inside each call. */
+    private function mock_openai(callable $during): void {
+        add_filter('pre_http_request', function ($pre, $args, $url) use ($during) {
+            if (false === strpos($url, 'openai.com')) {
+                return $pre;
+            }
+            $during();
+            $body = [
+                'status' => 'completed',
+                'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Plugin text.']]]],
+                'usage'  => ['input_tokens' => 10, 'output_tokens' => 3, 'total_tokens' => 13],
+            ];
+            return ['headers' => [], 'body' => wp_json_encode($body), 'response' => ['code' => 200, 'message' => 'OK'], 'cookies' => []];
+        }, 10, 3);
+    }
+
+    public function test_alt_saved_in_another_request_during_the_api_call_is_kept() {
+        $id = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
+        $run = $this->start(1);
+        $hits = 0;
+        $this->mock_openai(function () use ($id, &$hits) {
+            $hits++;
+            // The claim-time check has read (and cached) the empty alt text by now.
+            $this->write_alt_in_another_request($id, 'Skrivet av en person');
+        });
+        (new Auto_Alt_Text_Queue())->run();
+        $this->assertSame(1, $hits);
+        $this->assertSame('Skrivet av en person', $this->stored_alt($id));
+        $this->assertSame('skipped', $this->row_status($id));
+        $this->assertSame(1, Auto_Alt_Text_Library_Run::get($run['id'])['summary']['skipped']);
+    }
+
+    public function test_alt_saved_in_another_request_for_a_queued_image_skips_it_before_the_api_call() {
+        $first = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
+        $second = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
+        $this->start(2);
+        $this->assertSame(2, Auto_Alt_Text_Library_Run::feed(20));
+        // Something earlier in the request (or a persistent object cache) holds the second image's meta.
+        get_post_meta($second, '_wp_attachment_image_alt', true);
+        $hits = 0;
+        $this->mock_openai(function () use ($second, &$hits) {
+            $hits++;
+            $this->write_alt_in_another_request($second, 'Skrivet av en person');
+        });
+        (new Auto_Alt_Text_Queue())->run();
+        $this->assertSame(1, $hits, 'The second image must be skipped before any API call is paid for');
+        $this->assertSame('Plugin text.', $this->stored_alt($first));
+        $this->assertSame('Skrivet av en person', $this->stored_alt($second));
+        $this->assertSame('skipped', $this->row_status($second));
+    }
 }

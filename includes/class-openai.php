@@ -349,6 +349,9 @@ class Auto_Alt_Text_OpenAI  {
             return false;
         }
         $policy = Auto_Alt_Text_Library_Scanner::policy_for_coverage($run['coverage']);
+        // An editor may have saved alt text in another request during the API
+        // call; that never clears this request's meta cache, so read it fresh.
+        wp_cache_delete($attachment_id, 'post_meta');
         if (Auto_Alt_Text_Provenance::allows_overwrite($attachment_id, $policy)) {
             return false;
         }
