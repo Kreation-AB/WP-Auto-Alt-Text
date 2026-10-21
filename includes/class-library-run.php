@@ -155,6 +155,9 @@ class Auto_Alt_Text_Library_Run {
         if (null === $run || !in_array($run['status'], [self::STATUS_RUNNING, self::STATUS_PAUSED], true)) {
             return false;
         }
+        if (!self::close($id, self::STATUS_CANCELLED)) {
+            return false;
+        }
         $table = Auto_Alt_Text_Queue::get_table_name();
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and generated %d list only.
         $wpdb->query($wpdb->prepare(
@@ -162,9 +165,6 @@ class Auto_Alt_Text_Library_Run {
             $id, Auto_Alt_Text_Queue::STATUS_PENDING
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
-        if (!self::close($id, self::STATUS_CANCELLED)) {
-            return false;
-        }
         do_action('aat_library_run_cancelled', self::get($id));
         return true;
     }
@@ -280,6 +280,7 @@ class Auto_Alt_Text_Library_Run {
         $cursor = $run['cursor_id'];
         $enqueued = 0;
         $exhausted = false;
+        $stop = false;
         $supported = Auto_Alt_Text_Image_Source::supported_input_mimes();
         $policy = Auto_Alt_Text_Library_Scanner::policy_for_coverage($run['coverage']);
         $deadline = microtime(true) + self::FEED_BUDGET_SECONDS;
@@ -305,25 +306,43 @@ class Auto_Alt_Text_Library_Run {
             update_meta_cache('post', wp_list_pluck($rows, 'ID'));
             foreach ($rows as $row) {
                 $id = (int) $row->ID;
-                $cursor = $id;
                 if (in_array($row->post_mime_type, $supported, true)
-                    && Auto_Alt_Text_Provenance::allows_overwrite($id, $policy)
-                    && $queue->enqueue_for_run($id, $run['id'])) {
-                    $enqueued++;
-                    if (--$needed <= 0) {
+                    && Auto_Alt_Text_Provenance::allows_overwrite($id, $policy)) {
+                    if ($queue->enqueue_for_run($id, $run['id'])) {
+                        $enqueued++;
+                        $needed--;
+                    } elseif (self::STATUS_RUNNING !== self::status_of($run['id'])) {
+                        // Paused or closed meanwhile: this image was not handled, so the cursor stays before it.
+                        $stop = true;
                         break;
                     }
                 }
+                $cursor = $id;
+                if ($needed <= 0) {
+                    break;
+                }
+            }
+            if ($stop) {
+                break;
             }
         }
 
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
         $wpdb->query($wpdb->prepare(
-            "UPDATE {$runs} SET cursor_id = GREATEST(cursor_id, %d), fed_all = GREATEST(fed_all, %d), updated_at = %s WHERE id = %d AND status IN (%s, %s)",
-            $cursor, $exhausted ? 1 : 0, self::now(), $run['id'], self::STATUS_RUNNING, self::STATUS_PAUSED
+            "UPDATE {$runs} SET cursor_id = GREATEST(cursor_id, %d), fed_all = GREATEST(fed_all, %d), updated_at = %s WHERE id = %d AND status = %s",
+            $cursor, $exhausted && !$stop ? 1 : 0, self::now(), $run['id'], self::STATUS_RUNNING
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
         return $enqueued;
+    }
+
+    private static function status_of(int $id): ?string {
+        global $wpdb;
+        $runs = self::table();
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+        $status = $wpdb->get_var($wpdb->prepare("SELECT status FROM {$runs} WHERE id = %d", $id));
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+        return null === $status ? null : (string) $status;
     }
 
     /** Finishes the run once everything is fed and nothing is queued or in flight. */
@@ -384,11 +403,9 @@ class Auto_Alt_Text_Library_Run {
         }
         if (self::STATUS_FINISHED === $status) {
             do_action('aat_library_run_finished', self::get($id));
-            Auto_Alt_Text_Library_Scanner::request_recount();
         } elseif (self::STATUS_CANCELLED === $status) {
             // A cancelled run reopened for a retry and closed again.
             do_action('aat_library_run_cancelled', self::get($id));
-            Auto_Alt_Text_Library_Scanner::request_recount();
         }
     }
 
@@ -447,7 +464,12 @@ class Auto_Alt_Text_Library_Run {
             $status, $now, wp_json_encode($summary), $progress['total'], $remainder, $now, $id, self::STATUS_RUNNING, self::STATUS_PAUSED
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
-        return 1 === (int) $changed;
+        if (1 !== (int) $changed) {
+            return false;
+        }
+        // Every terminal transition makes the cached counts stale.
+        Auto_Alt_Text_Library_Scanner::request_recount();
+        return true;
     }
 
     /** Re-queues the run's failed rows, except unsupported formats; returns the count. */

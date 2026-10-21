@@ -123,10 +123,11 @@ class Auto_Alt_Text_Queue {
             // Only while the run is running, checked in the same statement.
             // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table names only.
             return 1 === (int) $wpdb->query($wpdb->prepare(
-                "UPDATE {$table} SET run_id = %d, generation_type = %s, attempts = 0, last_error = NULL, next_attempt_at = %s, updated_at = %s
+                "UPDATE {$table} SET attempts = IF(run_id IS NULL, attempts, 0), last_error = IF(run_id IS NULL, last_error, NULL),
+                 next_attempt_at = IF(run_id IS NULL, next_attempt_at, %s), run_id = %d, generation_type = %s, updated_at = %s
                  WHERE id = %d AND status = %s AND ((run_id IS NULL AND %d = 0) OR run_id = %d)
                  AND EXISTS (SELECT 1 FROM {$runs} WHERE id = %d AND status = %s)",
-                $run_id, self::LIBRARY_TYPE, $now, $now, (int) $active->id, self::STATUS_PENDING,
+                $now, $run_id, self::LIBRARY_TYPE, $now, (int) $active->id, self::STATUS_PENDING,
                 null === $active->run_id ? 0 : 1, (int) $active->run_id,
                 $run_id, Auto_Alt_Text_Library_Run::STATUS_RUNNING
             ));

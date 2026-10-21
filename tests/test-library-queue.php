@@ -363,13 +363,51 @@ class Auto_Alt_Text_Library_Queue_Test extends WP_UnitTestCase {
         $this->assertSame('finished', Auto_Alt_Text_Library_Run::get($first['id'])['status']);
         update_post_meta($old, '_wp_attachment_image_alt', 'Skrivet av en person');
         $this->image();
-        $second = $this->start(1);
-        Auto_Alt_Text_Library_Run::feed(5);
-        $this->assertSame(1, $this->run_row_count($second['id']));
+        $this->image();
+        $second = $this->start(2);
+        add_filter('aat_library_feed_window', fn() => 2);
+        // One row is processed (done), the other waits in backoff so the run stays open.
+        $once = new Auto_Alt_Text_Queue(function (int $id): array {
+            static $n = 0;
+            return ++$n === 1 ? ['status' => 'success', 'error' => null] : ['status' => 'retry', 'error' => 'later'];
+        });
+        $once->run();
+        $this->assertSame('running', Auto_Alt_Text_Library_Run::get($second['id'])['status']);
+        $this->assertSame(2, $this->run_row_count($second['id']));
         $this->age_rows(8);
         $this->queue('quota')->run();
         $this->assertSame(0, $this->run_row_count($first['id']));
-        $this->assertSame(1, $this->run_row_count($second['id']));
+        $this->assertSame(2, $this->run_row_count($second['id']));
+    }
+
+    public function test_a_pause_during_feed_does_not_skip_the_rest_of_the_chunk() {
+        for ($i = 0; $i < 12; $i++) {
+            $this->image();
+        }
+        $run = $this->start(12);
+        $paused = false;
+        $filter = function ($value, $object_id, $meta_key) use (&$paused, $run) {
+            if (!$paused && '_wp_attachment_image_alt' === $meta_key) {
+                $paused = true;
+                Auto_Alt_Text_Library_Run::pause($run['id']);
+            }
+            return $value;
+        };
+        add_filter('get_post_metadata', $filter, 10, 3);
+        Auto_Alt_Text_Library_Run::feed(3);
+        remove_filter('get_post_metadata', $filter, 10);
+        $this->assertSame(0, $this->run_row_count($run['id']));
+        $this->assertSame(0, Auto_Alt_Text_Library_Run::get($run['id'])['cursor_id']);
+
+        Auto_Alt_Text_Library_Run::resume($run['id']);
+        for ($i = 0; $i < 8; $i++) {
+            $this->queue()->run();
+        }
+        $done = Auto_Alt_Text_Library_Run::get($run['id']);
+        $this->assertSame('finished', $done['status']);
+        $this->assertSame(12, $done['summary']['filled']);
+        $this->assertSame(0, $done['summary']['skipped']);
+        $this->assertCount(12, $this->calls);
     }
 
     public function test_cancel_during_feed_leaves_the_run_closed_and_a_retry_feeds_nothing_more() {
@@ -394,7 +432,7 @@ class Auto_Alt_Text_Library_Queue_Test extends WP_UnitTestCase {
         $this->assertSame('cancelled', $after['status']);
         $this->assertSame(1, $after['fed_all']);
         $rows_at_cancel = $this->run_row_count($run['id']);
-        $this->assertLessThanOrEqual(1, $rows_at_cancel);
+        $this->assertSame(0, $rows_at_cancel);
         $this->assertSame(0, Auto_Alt_Text_Library_Run::feed(3));
         $this->assertSame($rows_at_cancel, $this->run_row_count($run['id']));
     }
