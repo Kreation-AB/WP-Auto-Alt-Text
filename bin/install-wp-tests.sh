@@ -48,6 +48,13 @@ if [ -e "$ABS_WP_CORE_DIR/wp-config.php" ]; then
 	exit 1
 fi
 
+# WordPress also accepts wp-config.php one level above ABSPATH, unless that
+# folder is itself a WordPress install (wp-settings.php): WordPress's own rule.
+if [ -e "$ABS_WP_CORE_DIR/../wp-config.php" ] && [ ! -e "$ABS_WP_CORE_DIR/../wp-settings.php" ]; then
+	echo "Refusing to install into $ABS_WP_CORE_DIR: it looks like part of a real WordPress site (../wp-config.php found). Point WP_CORE_DIR at a dedicated test folder." >&2
+	exit 1
+fi
+
 # Download a URL to a file, failing with a clear message on HTTP errors.
 download() {
 	local url="$1" dest="$2"
@@ -83,6 +90,10 @@ if [ "$WC_VERSION" != "none" ]; then
 	download "https://downloads.wordpress.org/plugin/woocommerce.$WC_VERSION.zip" "$TMP_DIR/woocommerce.zip"
 	rm -rf "$WP_CORE_DIR/wp-content/plugins/woocommerce"
 	unzip -q -o "$TMP_DIR/woocommerce.zip" -d "$WP_CORE_DIR/wp-content/plugins/"
+else
+	# The test bootstrap loads WooCommerce whenever the file exists, so an earlier
+	# install would turn a "no WooCommerce" run into a false green.
+	rm -rf "$WP_CORE_DIR/wp-content/plugins/woocommerce"
 fi
 
 # 3. Tests config.
@@ -111,5 +122,8 @@ if [ "$WC_VERSION" != "none" ]; then
 	WC_INSTALLED="$(sed -n 's/^ \* Version: *//p' "$WP_CORE_DIR/wp-content/plugins/woocommerce/woocommerce.php" | head -n 1)"
 	echo "WooCommerce: ${WC_INSTALLED:-unknown}"
 else
+	if [ -f "$WP_CORE_DIR/wp-content/plugins/woocommerce/woocommerce.php" ]; then
+		die "WooCommerce is still present in $WP_CORE_DIR/wp-content/plugins/woocommerce."
+	fi
 	echo "WooCommerce: not installed"
 fi
