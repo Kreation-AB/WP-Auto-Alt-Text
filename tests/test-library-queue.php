@@ -364,10 +364,64 @@ class Auto_Alt_Text_Library_Queue_Test extends WP_UnitTestCase {
         update_post_meta($old, '_wp_attachment_image_alt', 'Skrivet av en person');
         $this->image();
         $second = $this->start(1);
+        Auto_Alt_Text_Library_Run::feed(5);
+        $this->assertSame(1, $this->run_row_count($second['id']));
         $this->age_rows(8);
-        $this->queue()->run();
+        $this->queue('quota')->run();
         $this->assertSame(0, $this->run_row_count($first['id']));
         $this->assertSame(1, $this->run_row_count($second['id']));
+    }
+
+    public function test_cancel_during_feed_leaves_the_run_closed_and_a_retry_feeds_nothing_more() {
+        $ids = [];
+        for ($i = 0; $i < 12; $i++) {
+            $ids[] = $this->image();
+        }
+        $run = $this->start(12);
+        $cancelled = false;
+        $filter = function ($value, $object_id, $meta_key) use (&$cancelled, $run) {
+            if (!$cancelled && '_wp_attachment_image_alt' === $meta_key) {
+                $cancelled = true;
+                Auto_Alt_Text_Library_Run::cancel($run['id']);
+            }
+            return $value;
+        };
+        add_filter('get_post_metadata', $filter, 10, 3);
+        Auto_Alt_Text_Library_Run::feed(3);
+        remove_filter('get_post_metadata', $filter, 10);
+
+        $after = Auto_Alt_Text_Library_Run::get($run['id']);
+        $this->assertSame('cancelled', $after['status']);
+        $this->assertSame(1, $after['fed_all']);
+        $rows_at_cancel = $this->run_row_count($run['id']);
+        $this->assertLessThanOrEqual(1, $rows_at_cancel);
+        $this->assertSame(0, Auto_Alt_Text_Library_Run::feed(3));
+        $this->assertSame($rows_at_cancel, $this->run_row_count($run['id']));
+    }
+
+    public function test_retrying_after_a_mid_feed_cancel_processes_only_the_failed_rows() {
+        $ids = [];
+        for ($i = 0; $i < 12; $i++) {
+            $ids[] = $this->image();
+        }
+        $run = $this->start(12);
+        add_filter('aat_library_feed_window', fn() => 3);
+        (new Auto_Alt_Text_Queue(function (int $id): array {
+            $this->calls[] = $id;
+            return ['status' => 'failed', 'error' => 'Boom'];
+        }))->run();
+        $failed = count($this->calls);
+        $this->assertSame(3, $failed);
+        Auto_Alt_Text_Library_Run::cancel($run['id']);
+        $this->assertSame(1, Auto_Alt_Text_Library_Run::get($run['id'])['fed_all']);
+        Auto_Alt_Text_Library_Run::retry_failed($run['id']);
+        $this->assertSame(1, Auto_Alt_Text_Library_Run::get($run['id'])['fed_all']);
+        $this->calls = [];
+        for ($i = 0; $i < 6; $i++) {
+            $this->queue()->run();
+        }
+        $this->assertCount(3, $this->calls);
+        $this->assertSame('cancelled', Auto_Alt_Text_Library_Run::get($run['id'])['status']);
     }
 
     public function test_the_sweep_spares_a_paused_runs_pending_rows() {

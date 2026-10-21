@@ -118,11 +118,17 @@ class Auto_Alt_Text_Queue {
             } elseif (self::STATUS_PENDING !== $active->status) {
                 return false;
             }
-            // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+            $runs = Auto_Alt_Text_Activator::get_runs_table_name();
+            $now = current_time('mysql', true);
+            // Only while the run is running, checked in the same statement.
+            // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table names only.
             return 1 === (int) $wpdb->query($wpdb->prepare(
-                "UPDATE {$table} SET run_id = %d, generation_type = %s, updated_at = %s WHERE id = %d AND status = %s AND ((run_id IS NULL AND %d = 0) OR run_id = %d)",
-                $run_id, self::LIBRARY_TYPE, current_time('mysql', true), (int) $active->id, self::STATUS_PENDING,
-                null === $active->run_id ? 0 : 1, (int) $active->run_id
+                "UPDATE {$table} SET run_id = %d, generation_type = %s, attempts = 0, last_error = NULL, next_attempt_at = %s, updated_at = %s
+                 WHERE id = %d AND status = %s AND ((run_id IS NULL AND %d = 0) OR run_id = %d)
+                 AND EXISTS (SELECT 1 FROM {$runs} WHERE id = %d AND status = %s)",
+                $run_id, self::LIBRARY_TYPE, $now, $now, (int) $active->id, self::STATUS_PENDING,
+                null === $active->run_id ? 0 : 1, (int) $active->run_id,
+                $run_id, Auto_Alt_Text_Library_Run::STATUS_RUNNING
             ));
             // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
         }
@@ -139,16 +145,16 @@ class Auto_Alt_Text_Queue {
         }
 
         $now = current_time('mysql', true);
-        return (bool) $wpdb->insert($table, [
-            'attachment_id'   => $attachment_id,
-            'generation_type' => self::LIBRARY_TYPE,
-            'run_id'          => $run_id,
-            'status'          => self::STATUS_PENDING,
-            'attempts'        => 0,
-            'next_attempt_at' => $now,
-            'created_at'      => $now,
-            'updated_at'      => $now,
-        ], ['%d', '%s', '%d', '%s', '%d', '%s', '%s', '%s']);
+        $runs = Auto_Alt_Text_Activator::get_runs_table_name();
+        // Insert only while the run is running, checked in the same statement.
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table names only.
+        return 1 === (int) $wpdb->query($wpdb->prepare(
+            "INSERT INTO {$table} (attachment_id, generation_type, run_id, status, attempts, next_attempt_at, created_at, updated_at)
+             SELECT %d, %s, id, %s, 0, %s, %s, %s FROM {$runs} WHERE id = %d AND status = %s",
+            $attachment_id, self::LIBRARY_TYPE, self::STATUS_PENDING, $now, $now, $now,
+            $run_id, Auto_Alt_Text_Library_Run::STATUS_RUNNING
+        ));
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
     }
 
     /** Sets a job's context hint when a new one is given; the newest hint wins. */

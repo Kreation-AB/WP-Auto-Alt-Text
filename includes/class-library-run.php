@@ -283,7 +283,15 @@ class Auto_Alt_Text_Library_Run {
         $supported = Auto_Alt_Text_Image_Source::supported_input_mimes();
         $policy = Auto_Alt_Text_Library_Scanner::policy_for_coverage($run['coverage']);
         $deadline = microtime(true) + self::FEED_BUDGET_SECONDS;
+        $runs = self::table();
         while ($needed > 0 && microtime(true) < $deadline) {
+            // Stop as soon as the run is no longer running (cancelled or paused mid-feed).
+            // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+            $status = $wpdb->get_var($wpdb->prepare("SELECT status FROM {$runs} WHERE id = %d", $run['id']));
+            // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+            if (self::STATUS_RUNNING !== $status) {
+                break;
+            }
             $rows = $wpdb->get_results($wpdb->prepare(
                 "SELECT ID, post_mime_type FROM {$wpdb->posts}
                  WHERE ID > %d AND ID <= %d AND post_type = 'attachment' AND post_mime_type LIKE %s
@@ -294,7 +302,7 @@ class Auto_Alt_Text_Library_Run {
                 $exhausted = true;
                 break;
             }
-            _prime_post_caches(wp_list_pluck($rows, 'ID'), false, true);
+            update_meta_cache('post', wp_list_pluck($rows, 'ID'));
             foreach ($rows as $row) {
                 $id = (int) $row->ID;
                 $cursor = $id;
@@ -309,11 +317,10 @@ class Auto_Alt_Text_Library_Run {
             }
         }
 
-        $runs = self::table();
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
         $wpdb->query($wpdb->prepare(
-            "UPDATE {$runs} SET cursor_id = GREATEST(cursor_id, %d), fed_all = %d, updated_at = %s WHERE id = %d",
-            $cursor, $exhausted ? 1 : (int) $run['fed_all'], self::now(), $run['id']
+            "UPDATE {$runs} SET cursor_id = GREATEST(cursor_id, %d), fed_all = GREATEST(fed_all, %d), updated_at = %s WHERE id = %d AND status IN (%s, %s)",
+            $cursor, $exhausted ? 1 : 0, self::now(), $run['id'], self::STATUS_RUNNING, self::STATUS_PAUSED
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
         return $enqueued;
@@ -377,6 +384,10 @@ class Auto_Alt_Text_Library_Run {
         }
         if (self::STATUS_FINISHED === $status) {
             do_action('aat_library_run_finished', self::get($id));
+            Auto_Alt_Text_Library_Scanner::request_recount();
+        } elseif (self::STATUS_CANCELLED === $status) {
+            // A cancelled run reopened for a retry and closed again.
+            do_action('aat_library_run_cancelled', self::get($id));
             Auto_Alt_Text_Library_Scanner::request_recount();
         }
     }
@@ -476,17 +487,16 @@ class Auto_Alt_Text_Library_Run {
 
         $runs = self::table();
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and generated %d list only.
-        $reopened_from = $run['status'];
+        $summary = $run['summary'];
+        $summary['reopened_from'] = $run['status'];
         $flipped = $wpdb->query($wpdb->prepare(
-            "UPDATE {$runs} SET status = %s, ended_at = NULL, updated_at = %s WHERE id = %d AND status IN (%s, %s)",
-            self::STATUS_RUNNING, $now, $id, self::STATUS_FINISHED, self::STATUS_CANCELLED
+            "UPDATE {$runs} SET status = %s, ended_at = NULL, summary = %s, updated_at = %s WHERE id = %d AND status IN (%s, %s)",
+            self::STATUS_RUNNING, wp_json_encode($summary), $now, $id, self::STATUS_FINISHED, self::STATUS_CANCELLED
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
         if (1 !== (int) $flipped) {
             return 0;
         }
-        $run['summary']['reopened_from'] = $reopened_from;
-        self::save_summary($id, $run['summary']);
 
         $count = 0;
         foreach (array_chunk($ids, 500) as $chunk) {
