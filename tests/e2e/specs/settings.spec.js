@@ -8,20 +8,23 @@ const OPTIONS = [ 'auto_alt_text_model', 'auto_alt_text_naming', 'auto_alt_text_
 const JSON_OPTIONS = [ 'aat_key_status' ];
 const SLUGS = [ 'anslutning', 'sprak', 'namn', 'automatik', 'cache', 'feedback' ];
 
-// Submits the form and waits for options.php's redirect (settings-updated=true).
+// Submits the form and waits until the saved page (options.php's redirect, settings-updated=true) has loaded.
 async function save( page ) {
+	// Only a saved page has a settings notice, so its appearance below proves the new page is there:
+	// the old page can already show the section in its URL and panel.
+	await expect( page.locator( '.settings-error' ) ).toHaveCount( 0 );
 	// The redirected GET is a fresh response, so a stale settings-updated URL cannot satisfy this.
 	const redirected = page.waitForResponse( ( r ) => r.url().includes( 'settings-updated=true' ) );
 	await page.locator( '#submit' ).click();
 	await redirected;
+	await expect( page.locator( '.settings-error' ).first() ).toBeVisible();
+	// Then let it finish parsing.
+	await page.waitForLoadState( 'domcontentloaded' );
 }
 
 // After a save from a page reached by Töm cache, only the save's notice shows.
 async function expectNoCacheNoticeAfterSave( page ) {
 	await save( page );
-	// The page before the save had no settings notice, so this is the new page; then let it finish parsing.
-	await expect( page.locator( '.settings-error' ).first() ).toBeVisible();
-	await page.waitForLoadState( 'domcontentloaded' );
 	expect( await page.getByText( 'Cachen är tömd.' ).count() ).toBe( 0 );
 }
 
