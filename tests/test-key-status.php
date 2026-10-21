@@ -151,4 +151,107 @@ class Auto_Alt_Text_Key_Status_Test extends WP_UnitTestCase {
 
         $this->assertFalse(get_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT));
     }
+
+    private function as_user(string $role): void {
+        wp_set_current_user(self::factory()->user->create(['role' => $role]));
+    }
+
+    private function store_state(string $state): void {
+        $calls = [];
+        $this->save_key();
+        $code = ['ok' => 200, 'model_unavailable' => 404, 'auth_failed' => 401][$state];
+        $this->mock_openai($code, $calls);
+        Auto_Alt_Text_Key_Status::check(Auto_Alt_Text_Models::current_id());
+        remove_all_filters('pre_http_request');
+    }
+
+    private function notice_html(): string {
+        ob_start();
+        Auto_Alt_Text_Key_Status::render_admin_notice();
+        return (string) ob_get_clean();
+    }
+
+    public function tear_down() {
+        unset($_REQUEST['_wpnonce']);
+        parent::tear_down();
+    }
+
+    public function test_settings_url_has_optional_section_and_args() {
+        $this->assertSame(admin_url('admin.php?page=auto-alt-text'), auto_alt_text_settings_url());
+        $this->assertSame(admin_url('admin.php?page=auto-alt-text&section=anslutning'), auto_alt_text_settings_url('anslutning'));
+        $this->assertStringContainsString('foo=bar', auto_alt_text_settings_url('cache', ['foo' => 'bar']));
+    }
+
+    public function test_check_request_needs_manage_options() {
+        $this->as_user('editor');
+        $_REQUEST['_wpnonce'] = wp_create_nonce('aat_check_key');
+        $this->expectException(WPDieException::class);
+        Auto_Alt_Text_Key_Status::process_check_request();
+    }
+
+    public function test_check_request_needs_its_nonce() {
+        $this->as_user('administrator');
+        $this->expectException(WPDieException::class);
+        Auto_Alt_Text_Key_Status::process_check_request();
+    }
+
+    public function test_check_request_stores_the_result_and_returns_the_anslutning_url() {
+        $calls = [];
+        $this->as_user('administrator');
+        $this->save_key();
+        $this->mock_openai(200, $calls);
+        $_REQUEST['_wpnonce'] = wp_create_nonce('aat_check_key');
+
+        $url = Auto_Alt_Text_Key_Status::process_check_request();
+
+        $this->assertStringContainsString('page=auto-alt-text&section=anslutning', $url);
+        $this->assertSame('ok', Auto_Alt_Text_Key_Status::current()['state']);
+        $this->assertCount(1, $calls);
+    }
+
+    public function test_notice_shows_on_the_media_library_for_auth_failed_and_model_unavailable() {
+        $this->as_user('administrator');
+        set_current_screen('upload');
+        foreach (['auth_failed', 'model_unavailable'] as $state) {
+            $this->store_state($state);
+            $html = $this->notice_html();
+            $this->assertStringContainsString('notice-error', $html, $state);
+            $this->assertStringContainsString('section=anslutning', $html, $state);
+        }
+    }
+
+    public function test_notice_is_hidden_for_other_states_screens_and_users() {
+        $this->as_user('administrator');
+        set_current_screen('upload');
+        $this->store_state('ok');
+        $this->assertSame('', $this->notice_html());
+        delete_option(Auto_Alt_Text_Key_Status::OPTION);
+        $this->assertSame('', $this->notice_html());
+        Auto_Alt_Text_Quota_Monitor::record_failure('x');
+        $this->assertSame('', $this->notice_html());
+        delete_option(Auto_Alt_Text_Quota_Monitor::OPTION);
+
+        $this->store_state('auth_failed');
+        set_current_screen('dashboard');
+        $this->assertSame('', $this->notice_html());
+        set_current_screen('toplevel_page_auto-alt-text');
+        $this->assertSame('', $this->notice_html());
+
+        set_current_screen('upload');
+        $this->as_user('editor');
+        $this->assertSame('', $this->notice_html());
+    }
+
+    public function test_notice_makes_no_remote_call() {
+        $calls = [];
+        $this->as_user('administrator');
+        $this->store_state('model_unavailable');
+        update_option(Auto_Alt_Text_Key_Status::OPTION, array_merge(get_option(Auto_Alt_Text_Key_Status::OPTION), ['at' => time() - 3 * DAY_IN_SECONDS]));
+        $this->mock_openai(200, $calls);
+        set_current_screen('upload');
+
+        $this->notice_html();
+
+        $this->assertSame([], $calls);
+    }
 }

@@ -10,6 +10,7 @@ class Auto_Alt_Text_Key_Status {
     public const OPTION = 'aat_key_status';
     public const STALE_AFTER = DAY_IN_SECONDS;
     public const TIMEOUT = 5;
+    public const CHECK_ACTION = 'aat_check_key';
 
     public const NONE = 'none';
     public const OK = 'ok';
@@ -82,6 +83,52 @@ class Auto_Alt_Text_Key_Status {
             Auto_Alt_Text_Queue::clear_auth_pause();
         }
         return $state;
+    }
+
+    /** Runs the "Kontrollera nu" check for an administrator. Returns the URL to go back to. */
+    public static function process_check_request(): string {
+        if (!current_user_can('manage_options')) {
+            wp_die(esc_html__('Insufficient permissions.', 'WP-Auto-Alt-Text'));
+        }
+        check_admin_referer(self::CHECK_ACTION);
+        self::check(Auto_Alt_Text_Models::current_id());
+        return auto_alt_text_settings_url('anslutning');
+    }
+
+    public static function handle_check_request(): void {
+        wp_safe_redirect(self::process_check_request());
+        exit;
+    }
+
+    /** Shown on the Media Library and the plugin's own screens, except the settings page, which shows the status inline. */
+    public static function render_admin_notice(): void {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        if (
+            !$screen
+            || 'toplevel_page_auto-alt-text' === $screen->id
+            || ('upload' !== $screen->id && false === strpos((string) $screen->id, 'auto-alt-text'))
+        ) {
+            return;
+        }
+        $current = self::current();
+        if (self::AUTH_FAILED === $current['state']) {
+            $message = __('OpenAI godkänner inte API-nyckeln, så inga alt-texter kan genereras.', 'WP-Auto-Alt-Text');
+        } elseif (self::MODEL_UNAVAILABLE === $current['state']) {
+            /* translators: %s: model ID */
+            $message = sprintf(__('Modellen %s är inte tillgänglig för API-nyckeln, så inga alt-texter kan genereras.', 'WP-Auto-Alt-Text'), $current['model']);
+        } else {
+            return;
+        }
+        printf(
+            '<div class="notice notice-error"><p><strong>%1$s</strong> %2$s <a href="%3$s">%4$s</a></p></div>',
+            esc_html__('WP Auto Alt Text:', 'WP-Auto-Alt-Text'),
+            esc_html($message),
+            esc_url(auto_alt_text_settings_url('anslutning')),
+            esc_html__('Öppna inställningarna', 'WP-Auto-Alt-Text')
+        );
     }
 
     private static function record(): ?array {

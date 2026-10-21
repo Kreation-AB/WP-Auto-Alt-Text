@@ -23,6 +23,18 @@ function auto_alt_text_admin_styles($hook) {
 }
 
 /**
+ * URL of the settings page, optionally at a section (anslutning, sprak, namn,
+ * automatik, cache, feedback), with extra query args.
+ */
+function auto_alt_text_settings_url(string $section = '', array $args = []): string {
+    $query = ['page' => 'auto-alt-text'];
+    if ('' !== $section) {
+        $query['section'] = $section;
+    }
+    return admin_url('admin.php?' . http_build_query($query + $args, '', '&'));
+}
+
+/**
  * Registers the Auto Alt Text options page in the WordPress admin menu.
  *
  * This function adds an options page for the Auto Alt Text plugin to the WordPress admin menu.

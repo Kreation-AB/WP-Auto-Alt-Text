@@ -179,6 +179,8 @@ class WP_Auto_Alt_Text_Plugin {
 
 		add_action('admin_notices', ['Auto_Alt_Text_Quota_Monitor', 'render_admin_notice']);
 		add_action('admin_notices', ['Auto_Alt_Text_Connector_Status', 'render_admin_notice']);
+		add_action('admin_notices', ['Auto_Alt_Text_Key_Status', 'render_admin_notice']);
+		add_action('admin_post_aat_check_key', ['Auto_Alt_Text_Key_Status', 'handle_check_request']);
 		add_action('admin_post_aat_dismiss_quota_notice', ['Auto_Alt_Text_Quota_Monitor', 'handle_dismiss_request']);
 
 		add_filter('cron_schedules', function ($schedules) {
