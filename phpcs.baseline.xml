@@ -48,7 +48,6 @@
 <violation file="includes/class-queue.php" sniff="WordPress.DB.PreparedSQL.InterpolatedNotPrepared" signature="db4f1e38138d658dd7e97684902f2e9040266ed2"/>
 <violation file="includes/class-queue.php" sniff="WordPress.DB.PreparedSQL.InterpolatedNotPrepared" signature="e012cbbdf0570fb5c38d8519198eddbc8a601bcc"/>
 <violation file="includes/class-queue.php" sniff="WordPress.DB.PreparedSQL.InterpolatedNotPrepared" signature="e736e375c2b02a8fc8962608c3818183508efc96"/>
-<violation file="includes/class-queue.php" sniff="WordPress.DB.PreparedSQL.NotPrepared" signature="360e9a8372d30ae8456ce3deccc4ee20e647a427"/>
 <violation file="includes/class-queue.php" sniff="WordPress.DB.PreparedSQL.NotPrepared" signature="4a163ba203b8e739544284506267196c25af8176"/>
 <violation file="includes/class-queue.php" sniff="WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber" signature="178208e0534e58a688d0b32ded0b4b4f19663a05"/>
 <violation file="includes/class-queue.php" sniff="WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber" signature="ea007b4f43a7b10f5ec333ad9f5a168882eac804"/>

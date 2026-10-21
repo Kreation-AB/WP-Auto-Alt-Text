@@ -188,6 +188,8 @@ class WP_Auto_Alt_Text_Plugin {
 			return $schedules;
 		});
 		add_action('aat_queue_tick', ['Auto_Alt_Text_Library_Runner', 'cron_tick']);
+		add_action('aat_library_run_started', ['Auto_Alt_Text_Library_Runner', 'on_run_event']);
+		add_action('aat_library_run_resumed', ['Auto_Alt_Text_Library_Runner', 'on_run_event']);
 		add_action('admin_post_nopriv_' . Auto_Alt_Text_Library_Runner::TICK_ACTION, ['Auto_Alt_Text_Library_Runner', 'handle_tick_request']);
 		add_action('admin_post_' . Auto_Alt_Text_Library_Runner::TICK_ACTION, ['Auto_Alt_Text_Library_Runner', 'handle_tick_request']);
 		add_action('update_option_auto_alt_text_api_key', ['Auto_Alt_Text_Queue', 'clear_auth_pause']);

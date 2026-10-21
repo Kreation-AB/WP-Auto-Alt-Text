@@ -11,7 +11,7 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Queue::get_table_name());
         delete_option(Auto_Alt_Text_Quota_Monitor::OPTION);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);
-        delete_transient('aat_library_runner_lock');
+        delete_option('aat_library_runner_lock');
         (new Auto_Alt_Text_OpenAI())->save_api_key('sk-test-not-real');
         update_option('auto_alt_text_auto_generate', 1);
         $this->calls = [];
@@ -25,7 +25,7 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
     public function tearDown(): void {
         delete_option(Auto_Alt_Text_Quota_Monitor::OPTION);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);
-        delete_transient('aat_library_runner_lock');
+        delete_option('aat_library_runner_lock');
         delete_option('aat_library_counts');
         delete_option('aat_library_start_lock');
         unset($_POST['token']);
@@ -42,6 +42,7 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         ], false);
         $run = Auto_Alt_Text_Library_Run::start('missing', 1);
         $this->assertIsArray($run);
+        $this->requests = []; // Starting a run chains a tick of its own.
         return $run;
     }
 
@@ -50,27 +51,118 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         $wpdb->update(Auto_Alt_Text_Activator::get_runs_table_name(), ['last_tick_at' => $when], ['id' => $id]);
     }
 
-    public function test_run_with_a_budget_processes_until_the_budget_is_spent() {
-        for ($i = 0; $i < 20; $i++) {
+    private function upload_jobs(int $n): void {
+        for ($i = 0; $i < $n; $i++) {
             $id = self::factory()->attachment->create(['post_mime_type' => 'image/jpeg']);
             (new Auto_Alt_Text_Queue())->enqueue($id, 'upload');
         }
+    }
+
+    public function test_run_with_a_budget_processes_until_the_budget_is_spent() {
+        add_filter('aat_queue_batch_size', fn() => 1);
+        $this->upload_jobs(20);
         $processor = function (int $id): array {
             usleep(200000);
             $this->calls[] = $id;
             return ['status' => 'success', 'error' => null];
         };
-        (new Auto_Alt_Text_Queue($processor))->run(1.0);
-        $this->assertGreaterThanOrEqual(3, count($this->calls));
-        $this->assertLessThanOrEqual(7, count($this->calls));
+        $processed = (new Auto_Alt_Text_Queue($processor))->run(1.0);
+        $this->assertGreaterThanOrEqual(4, count($this->calls));
+        $this->assertLessThanOrEqual(6, count($this->calls));
+        $this->assertSame(count($this->calls), $processed);
 
         $this->calls = [];
+        remove_all_filters('aat_queue_batch_size');
         $processor = function (int $id): array {
             $this->calls[] = $id;
             return ['status' => 'success', 'error' => null];
         };
         (new Auto_Alt_Text_Queue($processor))->run();
         $this->assertCount(5, $this->calls);
+    }
+
+    public function test_run_with_a_budget_stops_early_when_nothing_is_claimable() {
+        $this->upload_jobs(3);
+        $processor = function (int $id): array {
+            $this->calls[] = $id;
+            return ['status' => 'success', 'error' => null];
+        };
+        $start = microtime(true);
+        $processed = (new Auto_Alt_Text_Queue($processor))->run(5.0);
+        $this->assertCount(3, $this->calls);
+        $this->assertSame(3, $processed);
+        $this->assertLessThan(1.0, microtime(true) - $start);
+    }
+
+    public function test_the_lock_is_atomic_owned_and_taken_over_when_stale() {
+        global $wpdb;
+        $first = Auto_Alt_Text_Library_Runner::take_lock();
+        $this->assertNotNull($first);
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::lock_held());
+        $this->assertNull(Auto_Alt_Text_Library_Runner::take_lock());
+
+        Auto_Alt_Text_Library_Runner::release_lock('someone-else');
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::lock_held());
+
+        $wpdb->update($wpdb->options, ['option_value' => sprintf('%010d|%s', time() - 5, $first)], ['option_name' => 'aat_library_runner_lock']);
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::lock_held());
+        $second = Auto_Alt_Text_Library_Runner::take_lock();
+        $this->assertNotNull($second);
+        $this->assertNotSame($first, $second);
+
+        // The first runner's late release must not delete the second's lock.
+        Auto_Alt_Text_Library_Runner::release_lock($first);
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::lock_held());
+        Auto_Alt_Text_Library_Runner::release_lock($second);
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::lock_held());
+    }
+
+    public function test_an_idle_tick_waits_before_it_chains() {
+        self::factory()->attachment->create(['post_mime_type' => 'image/jpeg']);
+        $this->start_run();
+        // One failed attempt leaves the only job in backoff: nothing is due.
+        $this->assertSame(1, (new Auto_Alt_Text_Queue(fn() => ['status' => 'retry', 'error' => 'x']))->run(5.0));
+        $log = [];
+        add_filter('aat_library_idle_wait', function ($wait) use (&$log) {
+            $log[] = ['wait', $wait];
+            return 0;
+        });
+        add_filter('pre_http_request', function ($pre) use (&$log) {
+            $log[] = ['chain'];
+            return $pre;
+        }, 5);
+        $_POST['token'] = Auto_Alt_Text_Library_Runner::token();
+        try {
+            Auto_Alt_Text_Library_Runner::handle_tick_request();
+        } catch (WPDieException $e) {
+            $this->assertSame(204, $e->getCode());
+        }
+        $this->assertSame('wait', $log[0][0]);
+        $this->assertGreaterThanOrEqual(1.0, $log[0][1]);
+        $this->assertLessThanOrEqual(20.0, $log[0][1]);
+        $this->assertSame(['chain'], $log[1] ?? null);
+    }
+
+    public function test_maybe_chain_needs_an_api_key_and_an_array_token_is_rejected() {
+        $this->start_run();
+        delete_option('auto_alt_text_api_key');
+        if (!defined('AUTO_ALT_TEXT_OPENAI_API_KEY')) {
+            $this->assertFalse(Auto_Alt_Text_Library_Runner::maybe_chain());
+        }
+        $_POST['token'] = ['x'];
+        try {
+            Auto_Alt_Text_Library_Runner::handle_tick_request();
+            $this->fail('Expected wp_die');
+        } catch (WPDieException $e) {
+            $this->assertSame(403, $e->getCode());
+        }
+    }
+
+    public function test_loopback_args_are_filterable() {
+        $this->start_run();
+        add_filter('aat_library_loopback_args', fn($args) => $args + ['headers' => ['Authorization' => 'Basic x']]);
+        Auto_Alt_Text_Library_Runner::maybe_chain();
+        $this->assertSame('Basic x', $this->requests[0]['args']['headers']['Authorization']);
     }
 
     public function test_maybe_chain_sends_a_non_blocking_loopback_while_a_run_is_active() {
@@ -89,9 +181,9 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         $this->assertSame($token, $request['args']['body']['token']);
 
         $this->requests = [];
-        set_transient('aat_library_runner_lock', 1, 60);
+        $this->assertNotNull(Auto_Alt_Text_Library_Runner::take_lock());
         $this->assertFalse(Auto_Alt_Text_Library_Runner::maybe_chain());
-        delete_transient('aat_library_runner_lock');
+        delete_option('aat_library_runner_lock');
 
         update_option(Auto_Alt_Text_Quota_Monitor::OPTION, [
             'active' => true, 'detected_at' => time(), 'last_probe_at' => time(),
@@ -119,7 +211,7 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
             $this->assertSame(403, $e->getCode());
         }
         $this->assertNull(Auto_Alt_Text_Library_Run::get($run['id'])['last_tick_at']);
-        $this->assertFalse(get_transient('aat_library_runner_lock'));
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::lock_held());
         $this->assertSame([], $this->requests);
     }
 
@@ -133,18 +225,18 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
             $this->assertSame(204, $e->getCode());
         }
         $this->assertNotNull(Auto_Alt_Text_Library_Run::get($run['id'])['last_tick_at']);
-        $this->assertFalse(get_transient('aat_library_runner_lock'));
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::lock_held());
     }
 
     public function test_cron_tick_skips_while_the_lock_is_held() {
         $run = $this->start_run();
-        set_transient('aat_library_runner_lock', 1, 60);
+        $this->assertNotNull(Auto_Alt_Text_Library_Runner::take_lock());
         Auto_Alt_Text_Library_Runner::cron_tick();
         $this->assertNull(Auto_Alt_Text_Library_Run::get($run['id'])['last_tick_at']);
-        delete_transient('aat_library_runner_lock');
+        delete_option('aat_library_runner_lock');
         Auto_Alt_Text_Library_Runner::cron_tick();
         $this->assertNotNull(Auto_Alt_Text_Library_Run::get($run['id'])['last_tick_at']);
-        $this->assertFalse(get_transient('aat_library_runner_lock'));
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::lock_held());
     }
 
     public function test_health_reports_a_stalled_run() {
@@ -157,6 +249,9 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         $this->assertSame(defined('DISABLE_WP_CRON') && DISABLE_WP_CRON, $health['cron_disabled']);
 
         $this->set_tick($id, null);
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::health(Auto_Alt_Text_Library_Run::get($id))['stalled'], 'just started');
+        global $wpdb;
+        $wpdb->update(Auto_Alt_Text_Activator::get_runs_table_name(), ['started_at' => gmdate('Y-m-d H:i:s', time() - 11 * MINUTE_IN_SECONDS)], ['id' => $id]);
         $this->assertTrue(Auto_Alt_Text_Library_Runner::health(Auto_Alt_Text_Library_Run::get($id))['stalled']);
 
         $this->set_tick($id, gmdate('Y-m-d H:i:s', time() - MINUTE_IN_SECONDS));

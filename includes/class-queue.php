@@ -28,6 +28,9 @@ class Auto_Alt_Text_Queue {
     /** @var callable|null */
     private $processor;
 
+    /** Set by a batch that hit a quota, auth or rate-limit stop. */
+    private bool $halted = false;
+
     /**
      * @param callable|null $processor Overridable job processor for testing.
      *                                 Signature: fn(int $attachment_id, string $generation_type, ?int $context_post_id): array
@@ -209,23 +212,37 @@ class Auto_Alt_Text_Queue {
      * With a time budget (seconds) batches repeat until it is spent, nothing
      * is due or a quota, auth or rate-limit stop happens. The budget is
      * checked between batches, so a started batch always finishes.
+     * Maintenance runs once per call, not per batch.
+     *
+     * @param callable|null $after_batch Called after every batch (e.g. to refresh a lock).
+     * @return int Number of jobs processed.
      */
-    public function run(?float $time_budget = null) {
+    public function run(?float $time_budget = null, ?callable $after_batch = null): int {
         $run = Auto_Alt_Text_Library_Run::active();
         if (null !== $run) {
             Auto_Alt_Text_Library_Run::feed((int) apply_filters('aat_library_feed_window', 20));
         }
         $deadline = null !== $time_budget ? microtime(true) + $time_budget : null;
-        do {
-            $again = $this->run_batch();
-        } while ($again && null !== $deadline && microtime(true) < $deadline);
+        $total = 0;
+        if ($this->start_tick()) {
+            do {
+                $this->halted = false;
+                $count = $this->run_batch();
+                $total += $count;
+                if (null !== $after_batch) {
+                    call_user_func($after_batch);
+                }
+            } while ($count > 0 && !$this->halted && null !== $deadline && microtime(true) < $deadline);
+        }
         if (null !== $run) {
             Auto_Alt_Text_Library_Run::maybe_finish($run['id']);
             Auto_Alt_Text_Library_Run::touch_tick($run['id']);
         }
+        return $total;
     }
 
-    private function run_batch() {
+    /** Whether the tick may process jobs; does the once-per-tick maintenance. */
+    private function start_tick(): bool {
         global $wpdb;
         // Idle fast-path: an empty table needs no maintenance writes.
         // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Internal table name only.
@@ -242,11 +259,19 @@ class Auto_Alt_Text_Queue {
         $this->recover_stuck_jobs();
         $this->prune();
         $this->skip_orphaned_run_jobs();
+        return true;
+    }
 
+    /**
+     * @phpstan-impure
+     * @return int Jobs processed by this batch; sets $halted on a stop.
+     */
+    private function run_batch(): int {
         $probing = false;
         if (Auto_Alt_Text_Quota_Monitor::is_active()) {
             if (!Auto_Alt_Text_Quota_Monitor::should_probe()) {
-                return false; // Paused: jobs wait as pending; backlog drains after recovery.
+                $this->halted = true;
+                return 0; // Paused: jobs wait as pending; backlog drains after recovery.
             }
             $probing = true;
         }
@@ -262,18 +287,19 @@ class Auto_Alt_Text_Queue {
             ? $active_run['id'] : null;
         $jobs = $this->claim_batch($batch_size, $excluded_types, $run_id);
 
-        $stopped = false;
+        $processed = 0;
         $unprocessed_ids = wp_list_pluck($jobs, 'id');
         foreach ($jobs as $job) {
             if (!$rate_limiter->can_make_request()) {
-                $stopped = true;
+                $this->halted = true;
                 break; // Rate limited: stop, remaining claimed jobs are released below.
             }
             // This job is about to be processed; drop it from the release list
             // regardless of outcome (process_job() always finalizes or reschedules it).
             $unprocessed_ids = array_diff($unprocessed_ids, [$job->id]);
+            $processed++;
             if (!$this->process_job($job)) {
-                $stopped = true;
+                $this->halted = true;
                 break; // quota or rate-limit stop: remaining claimed jobs are released below.
             }
         }
@@ -281,7 +307,7 @@ class Auto_Alt_Text_Queue {
         if (!empty($unprocessed_ids)) {
             $this->release_claimed($unprocessed_ids);
         }
-        return !$stopped && !empty($jobs);
+        return $processed;
     }
 
     /**
@@ -577,7 +603,7 @@ class Auto_Alt_Text_Queue {
         delete_transient(self::AUTH_PAUSE_TRANSIENT);
     }
 
-    private static function has_api_key() {
+    public static function has_api_key() {
         if (defined('AUTO_ALT_TEXT_OPENAI_API_KEY') && AUTO_ALT_TEXT_OPENAI_API_KEY) {
             return true;
         }
