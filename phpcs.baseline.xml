@@ -72,8 +72,6 @@
 <violation file="includes/class-wp-media-folder.php" sniff="WordPress.Security.ValidatedSanitizedInput.InputNotSanitized" signature="7761c91a61cd1d83c4a0fcde52d99f3639b34a9a"/>
 <violation file="includes/class-wp-media-folder.php" sniff="WordPress.Security.ValidatedSanitizedInput.MissingUnslash" signature="7761c91a61cd1d83c4a0fcde52d99f3639b34a9a"/>
 <violation file="includes/class-wp-media-folder.php" sniff="WordPress.Security.ValidatedSanitizedInput.MissingUnslash" signature="e788506434f32e7cbf0b5aedbfe58b0fa448eb51"/>
-<violation file="includes/options-page.php" sniff="WordPress.Security.EscapeOutput.UnsafePrintingFunction" signature="324676dcdf67a540b10da680ccf9b7cfc78f8c7c"/>
 <violation file="includes/options-page.php" sniff="WordPress.Security.NonceVerification.Missing" signature="7436af03f1549ba89a6ba6a5c96410efeff19670"/>
-<violation file="includes/options-page.php" sniff="WordPress.WP.I18n.TextDomainMismatch" signature="324676dcdf67a540b10da680ccf9b7cfc78f8c7c"/>
 </phpcs-baseline>
 

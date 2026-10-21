@@ -277,12 +277,6 @@ parameters:
 			path: includes/options-page.php
 
 		-
-			message: '#^Parameter \#1 \$text of function esc_attr expects string, int given\.$#'
-			identifier: argument.type
-			count: 1
-			path: includes/options-page.php
-
-		-
 			message: '#^Parameter \#3 \$args of function register_setting expects array\{type\?\: string, label\?\: string, description\?\: string, sanitize_callback\?\: callable\(\)\: mixed, show_in_rest\?\: array\|bool, default\?\: mixed\}, ''auto_alt_text…'' given\.$#'
 			identifier: argument.type
 			count: 4
