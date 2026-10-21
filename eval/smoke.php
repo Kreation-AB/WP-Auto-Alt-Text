@@ -5,7 +5,7 @@
  *   wp eval-file <plugin>/eval/smoke.php [dry-run=1]
  *
  * Opt-in, run by hand on the dev site before a release. Generates alt text for
- * five eval images with the real API (about $0.02), checks the quality gates,
+ * five eval images with the real API (about $0.03), checks the quality gates,
  * prints a table and the cost, and deletes what it imported. It never writes
  * alt text. Exits 0 when every gate passes, 1 otherwise. With dry-run=1 it
  * only lists the items, the model and the estimate: no import, no API call.
