@@ -30,6 +30,24 @@ async function openSection( page, slug ) {
 	await expect( page.locator( '#aat-section-' + slug ) ).toBeVisible();
 }
 
+/**
+ * Clicks Kontrollera nu from an unchecked key, so only the click can produce ✓:
+ * every save checks the key while no valid record exists and stores one.
+ * The tests site defines AUTO_ALT_TEXT_OPENAI_API_KEY (a fake key), and the mock answers GET /v1/models/{id} with 200.
+ * The describe's afterAll restores aat_key_status.
+ */
+async function checkKeyFromUnchecked( page ) {
+	restoreOption( 'aat_key_status', null );
+	await page.goto( SETTINGS );
+	await openSection( page, 'anslutning' );
+	await expect( page.locator( '#aat-key-status' ) ).toHaveText( 'Inte kontrollerad' );
+
+	const posted = page.waitForResponse( ( r ) => r.request().method() === 'POST' && r.url().includes( '/wp-admin/admin-post.php' ) );
+	await page.getByRole( 'button', { name: 'Kontrollera nu' } ).click();
+	expect( ( await posted ).status() ).toBe( 302 );
+	await expect( page.locator( '#aat-key-status' ) ).toHaveText( /^✓ Nyckeln fungerar och har tillgång till / );
+}
+
 /** Collects the POSTs the page sends, so a test can assert that a form did not submit. */
 function recordPosts( page ) {
 	const posts = [];
@@ -258,12 +276,7 @@ test.describe( 'settings page', () => {
 	} );
 
 	test( 'Kontrollera nu shows a working key', async ( { page } ) => {
-		// The tests site defines AUTO_ALT_TEXT_OPENAI_API_KEY (a fake key) and the mock answers GET /v1/models/{id} with 200.
-		await page.goto( SETTINGS );
-		await openSection( page, 'anslutning' );
-		await page.getByRole( 'button', { name: 'Kontrollera nu' } ).click();
-
-		await expect( page.locator( '#aat-key-status' ) ).toContainText( 'Nyckeln fungerar' );
+		await checkKeyFromUnchecked( page );
 		expect( page.url() ).toContain( 'section=anslutning' );
 		await expect( page.locator( '#aat-summary-anslutning' ) ).toContainText( '✓ Nyckel' );
 	} );
@@ -332,8 +345,7 @@ test.describe( 'settings page', () => {
 			// Without JS the flag stays in the URL and the form's referer; the save's page still must not repeat it.
 			await expectNoCacheNoticeAfterSave( page );
 
-			await page.getByRole( 'button', { name: 'Kontrollera nu' } ).click();
-			await expect( page.locator( '#aat-key-status' ) ).toContainText( 'Nyckeln fungerar' );
+			await checkKeyFromUnchecked( page );
 		} );
 	} );
 } );
