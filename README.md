@@ -192,12 +192,13 @@ Product images are queued in two ways only: when a product (or a variation) is s
 
 ## Running tests
 
-Requirements: PHP 8.0+, Composer, `curl`, `unzip`, and a MySQL user that can create databases.
+Requirements: PHP 8.0+, Composer, `curl`, `unzip`, and a MySQL user that can create databases. The end-to-end tests also need Node 22 or newer (`engines` in `package.json`) and Docker (for wp-env).
 
 1. `composer install`
-2. Install WordPress and WooCommerce and write the tests config. Use a dedicated database (default `wp_aat_tests`): the suite drops its tables.
+2. Create the dedicated test database (default `wp_aat_tests`; the suite drops its tables, so never point it at a real site), then install WordPress and WooCommerce and write the tests config.
 
    ```
+   mysql -u root -e 'CREATE DATABASE IF NOT EXISTS wp_aat_tests'
    WP_VERSION=7.1.1 WC_VERSION=11.2.1 bin/install-wp-tests.sh
    ```
 
@@ -210,7 +211,7 @@ Requirements: PHP 8.0+, Composer, `curl`, `unzip`, and a MySQL user that can cre
    | `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` | `wp_aat_tests`, `root`, empty, `localhost` | Database settings |
    | `FORCE` | unset | `1` overwrites an existing config |
 
-   Relative `WP_CORE_DIR` and `TESTS_CONFIG` paths resolve against the plugin directory. Re-running replaces `wp-admin` and `wp-includes` and keeps `wp-content`. An existing config is never overwritten without `FORCE=1`. The script refuses to run against a folder that has a `wp-config.php` (a real site). To use a config elsewhere, set `WP_PHPUNIT__TESTS_CONFIG` to its path.
+   Relative `WP_CORE_DIR` and `TESTS_CONFIG` paths resolve against the plugin directory. Re-running replaces `wp-admin` and `wp-includes` and keeps `wp-content`; `WC_VERSION=none` removes an earlier WooCommerce install. An existing config is never overwritten without `FORCE=1`. The script refuses to run against a folder that has a `wp-config.php` (a real site). To use a config elsewhere, set `WP_PHPUNIT__TESTS_CONFIG` to its path.
 3. `composer test`
 
 ### Checks
@@ -220,7 +221,7 @@ composer check           # PHP lint, PHPCS, PHPStan and PHPUnit; needs no Node o
 composer test:coverage   # coverage to build/coverage/ (needs pcov or Xdebug)
 ```
 
-Single steps: `composer lint:php`, `composer lint` (PHPCS), `composer analyse` (PHPStan), `composer test`.
+Single steps: `composer lint:php`, `composer lint` (PHPCS), `composer analyse` (PHPStan), `composer test`, and `npm run lint:js` (syntax check of `admin/js/app.js`; needs Node).
 
 ### End-to-end tests
 
@@ -228,6 +229,7 @@ Playwright runs against wp-env (Docker) and never touches a local dev site.
 
 ```
 npm ci
+npx playwright install chromium   # add --with-deps on a fresh Linux machine
 npm run env:start
 npm run test:e2e
 npm run env:stop
@@ -251,25 +253,26 @@ read -rs OPENAI_API_KEY; export OPENAI_API_KEY; composer fixtures:record; unset 
 
 1. `setup`
 2. `static`: lint, PHPCS, PHPStan and the baseline guard
-3. `phpunit` matrix: PHP 8.0-8.4, WordPress 6.0 (minimum) and the pinned version, with and without WooCommerce, one Imagick cell, and one coverage cell that runs diff-cover on PRs
+3. `phpunit` matrix (defined in the `setup` job): PHP 8.0-8.4 on the pinned WordPress and WooCommerce, `wp-min` (PHP 8.0, WordPress 6.0, no WooCommerce), `no-woo` (PHP 8.4, no WooCommerce) and one `imagick` cell (PHP 8.3) that also collects coverage and runs diff-cover on PRs. It is not a full PHP x WordPress x WooCommerce cross-product
 4. `e2e`
 
-The weekly run tests the latest WordPress and WooCommerce. Results are on the PR's Checks tab and under the Actions tab of `Kreation-AB/WP-Auto-Alt-Text`.
+The weekly run tests the latest WordPress and WooCommerce in a single PHP 8.4 cell. Results are on the PR's Checks tab and under the Actions tab of `Kreation-AB/WP-Auto-Alt-Text`.
 
 ### Bumping the pinned versions
 
 The pinned versions are `WP_LATEST` and `WC_LATEST` in the workflow's top-level `env:`. Change all of these in one PR:
 
 - [ ] `.github/workflows/ci.yml`, the `env` block
-- [ ] `.wp-env.json`
+- [ ] `.wp-env.json`, both places: the core (`WordPress/WordPress#...`) and the WooCommerce zip URL
 - [ ] the README install command (`WP_VERSION=... WC_VERSION=... bin/install-wp-tests.sh`)
-- [ ] the `wp-phpunit/wp-phpunit` constraint in `composer.json` (currently `^7.1`)
+- [ ] the `wp-phpunit/wp-phpunit` constraint in `composer.json` (currently `^7.1`), then `composer update wp-phpunit/wp-phpunit` and commit `composer.lock` (the lock decides the installed version)
+- [ ] the plugin header `WC tested up to`
 
 The CHANGELOG line "Testsviten körs på WordPress 7.1.1 med WooCommerce 11.2.1" names the pinned versions and must change with them.
 
 ### Before a release
 
-`eval/smoke.php` is an opt-in live smoke test. It generates alt text for five eval images (A01, B03, C04, D05, D06) with the real API and the default model, checks the format and product-name gates, prints a table with the cost (about $0.02) and deletes what it imported. It never writes alt text. It needs WooCommerce active and the eval images fetched (`php eval/fetch.php`), reads the site's API key, and runs only by hand, never in CI or `composer check`:
+`eval/smoke.php` is an opt-in live smoke test. It generates alt text for five eval images (A01, B03, C04, D05, D06) with the real API and the default model, checks the format and product-name gates, prints a table with the cost (about $0.03) and deletes what it imported. It never writes alt text. It needs WooCommerce active and the eval images fetched (`php eval/fetch.php`), reads the site's API key, and runs only by hand, never in CI or `composer check`:
 
 ```
 wp eval-file wp-content/plugins/WP-Auto-Alt-Text/eval/smoke.php dry-run=1   # lists items, model and estimate; no request
