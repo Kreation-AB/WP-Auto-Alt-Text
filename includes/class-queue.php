@@ -11,6 +11,7 @@ class Auto_Alt_Text_Queue {
     public const STATUS_PROCESSING = 'processing';
     public const STATUS_DONE       = 'done';
     public const STATUS_FAILED     = 'failed';
+    public const STATUS_SKIPPED    = 'skipped';
 
     public const MAX_ATTEMPTS = 8;
 
