@@ -45,6 +45,24 @@ function aat_e2e_mock_route( string $method, string $url ) {
 	return Auto_Alt_Text_Test_OpenAI_Fixtures::to_http_response( Auto_Alt_Text_Test_OpenAI_Fixtures::load( $name ) );
 }
 
+/** pre_http_request callback: swallows the library runner's non-blocking loopback tick. */
+function aat_e2e_block_library_loopback( $pre, array $args, string $url ) {
+	$action = is_array( $args['body'] ?? null ) ? ( $args['body']['action'] ?? '' ) : '';
+	if ( 'aat_library_tick' === $action && false !== strpos( $url, 'admin-post.php' ) ) {
+		return array(
+			'headers'  => array(),
+			'body'     => '',
+			'response' => array(
+				'code'    => 204,
+				'message' => 'No Content',
+			),
+			'cookies'  => array(),
+			'filename' => null,
+		);
+	}
+	return $pre;
+}
+
 /** pre_http_request callback: answers openai.com requests, leaves everything else alone. */
 function aat_e2e_mock_filter( $pre, array $args, string $url ) {
 	if ( false === strpos( $url, 'openai.com' ) ) {
@@ -56,6 +74,8 @@ function aat_e2e_mock_filter( $pre, array $args, string $url ) {
 function aat_e2e_mock_bootstrap( bool $enabled ): void {
 	if ( $enabled ) {
 		add_filter( 'pre_http_request', 'aat_e2e_mock_filter', 10, 3 );
+		// Specs drive library ticks through WP-CLI. The loopback chain would otherwise race them and finish a run at once.
+		add_filter( 'pre_http_request', 'aat_e2e_block_library_loopback', 5, 3 );
 		// With aat_e2e_queue_limits set, one queue tick feeds and fills a single library image (cancel spec).
 		$aat_e2e_one = static function ( $value ) {
 			return get_option( 'aat_e2e_queue_limits' ) ? 1 : $value;
