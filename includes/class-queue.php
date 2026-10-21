@@ -205,13 +205,20 @@ class Auto_Alt_Text_Queue {
      * Cron entry point: recover stuck jobs, prune old rows, then claim and
      * process a bounded batch. One API attempt per job — retry timing lives
      * in next_attempt_at, never in sleep().
+     *
+     * With a time budget (seconds) batches repeat until it is spent, nothing
+     * is due or a quota, auth or rate-limit stop happens. The budget is
+     * checked between batches, so a started batch always finishes.
      */
-    public function run() {
+    public function run(?float $time_budget = null) {
         $run = Auto_Alt_Text_Library_Run::active();
         if (null !== $run) {
             Auto_Alt_Text_Library_Run::feed((int) apply_filters('aat_library_feed_window', 20));
         }
-        $this->run_batch();
+        $deadline = null !== $time_budget ? microtime(true) + $time_budget : null;
+        do {
+            $again = $this->run_batch();
+        } while ($again && null !== $deadline && microtime(true) < $deadline);
         if (null !== $run) {
             Auto_Alt_Text_Library_Run::maybe_finish($run['id']);
             Auto_Alt_Text_Library_Run::touch_tick($run['id']);
@@ -221,14 +228,15 @@ class Auto_Alt_Text_Queue {
     private function run_batch() {
         global $wpdb;
         // Idle fast-path: an empty table needs no maintenance writes.
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Internal table name only.
         if (!$wpdb->get_var('SELECT id FROM ' . self::get_table_name() . ' LIMIT 1')) {
-            return;
+            return false;
         }
 
         // Without a working API key every job would burn its attempts and
         // fail: leave the backlog pending until a key is set or the pause ends.
         if (!self::has_api_key() || get_transient(self::AUTH_PAUSE_TRANSIENT)) {
-            return;
+            return false;
         }
 
         $this->recover_stuck_jobs();
@@ -238,7 +246,7 @@ class Auto_Alt_Text_Queue {
         $probing = false;
         if (Auto_Alt_Text_Quota_Monitor::is_active()) {
             if (!Auto_Alt_Text_Quota_Monitor::should_probe()) {
-                return; // Paused: jobs wait as pending; backlog drains after recovery.
+                return false; // Paused: jobs wait as pending; backlog drains after recovery.
             }
             $probing = true;
         }
@@ -254,15 +262,18 @@ class Auto_Alt_Text_Queue {
             ? $active_run['id'] : null;
         $jobs = $this->claim_batch($batch_size, $excluded_types, $run_id);
 
+        $stopped = false;
         $unprocessed_ids = wp_list_pluck($jobs, 'id');
         foreach ($jobs as $job) {
             if (!$rate_limiter->can_make_request()) {
+                $stopped = true;
                 break; // Rate limited: stop, remaining claimed jobs are released below.
             }
             // This job is about to be processed; drop it from the release list
             // regardless of outcome (process_job() always finalizes or reschedules it).
             $unprocessed_ids = array_diff($unprocessed_ids, [$job->id]);
             if (!$this->process_job($job)) {
+                $stopped = true;
                 break; // quota or rate-limit stop: remaining claimed jobs are released below.
             }
         }
@@ -270,6 +281,7 @@ class Auto_Alt_Text_Queue {
         if (!empty($unprocessed_ids)) {
             $this->release_claimed($unprocessed_ids);
         }
+        return !$stopped && !empty($jobs);
     }
 
     /**
