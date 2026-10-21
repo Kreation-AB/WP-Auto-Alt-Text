@@ -18,6 +18,11 @@ tests_add_filter( 'muplugins_loaded', function () {
 } );
 
 tests_add_filter( 'setup_theme', function () {
+	// Create the plugin's tables for real, outside any test. Inside a test,
+	// start_transaction() turns CREATE TABLE into CREATE TEMPORARY TABLE, and
+	// SHOW TABLES never lists those, so activate() would not record the schema.
+	Auto_Alt_Text_Activator::activate();
+
 	if ( class_exists( 'WC_Install' ) ) {
 		WC_Install::install();
 		// Reload roles so the capabilities WooCommerce just added are visible.
