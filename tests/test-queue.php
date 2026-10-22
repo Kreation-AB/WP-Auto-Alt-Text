@@ -439,7 +439,7 @@ class Auto_Alt_Text_Queue_Test extends WP_UnitTestCase {
         $queue->run();
 
         $this->assertSame([], $calls);
-        $this->assertSame(Auto_Alt_Text_Queue::STATUS_DONE, $this->get_job($id)->status);
+        $this->assertSame(Auto_Alt_Text_Queue::STATUS_SKIPPED, $this->get_job($id)->status);
     }
 
     public function test_explicit_job_rewrites_untouched_ai_alt_text_when_policy_is_ai() {
@@ -469,7 +469,7 @@ class Auto_Alt_Text_Queue_Test extends WP_UnitTestCase {
         delete_option(Auto_Alt_Text_Provenance::POLICY_OPTION);
 
         $this->assertSame([], $calls);
-        $this->assertSame(Auto_Alt_Text_Queue::STATUS_DONE, $this->get_job($id)->status);
+        $this->assertSame(Auto_Alt_Text_Queue::STATUS_SKIPPED, $this->get_job($id)->status);
         $this->assertSame('Editor fixed it', get_post_meta($id, '_wp_attachment_image_alt', true));
     }
 

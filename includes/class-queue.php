@@ -18,6 +18,12 @@ class Auto_Alt_Text_Queue {
 
     public const MAX_ATTEMPTS = 8;
 
+    /** Explicit bulk-action types: owned by the bulk feed, never adopted by a library run. */
+    public const BULK_TYPES = ['batch', 'woocommerce_bulk'];
+
+    /** last_error of a job the user cancelled before it ran. */
+    public const CANCELLED_ERROR = 'cancelled';
+
     /** Job types created by automatic triggers; paused while auto-generation is off. */
     public const AUTO_GENERATION_TYPES = ['upload', 'woocommerce', 'woocommerce_variation'];
 
@@ -107,7 +113,7 @@ class Auto_Alt_Text_Queue {
         $table = self::get_table_name();
         // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
         $active = $wpdb->get_row($wpdb->prepare(
-            "SELECT id, run_id, status FROM {$table} WHERE attachment_id = %d AND status IN (%s, %s) LIMIT 1",
+            "SELECT id, run_id, status, generation_type FROM {$table} WHERE attachment_id = %d AND status IN (%s, %s) LIMIT 1",
             $attachment_id, self::STATUS_PENDING, self::STATUS_PROCESSING
         ));
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
@@ -121,7 +127,8 @@ class Auto_Alt_Text_Queue {
                 if (null !== $other && in_array($other['status'], [Auto_Alt_Text_Library_Run::STATUS_RUNNING, Auto_Alt_Text_Library_Run::STATUS_PAUSED], true)) {
                     return false;
                 }
-            } elseif (self::STATUS_PENDING !== $active->status) {
+            } elseif (self::STATUS_PENDING !== $active->status || in_array($active->generation_type, self::BULK_TYPES, true)) {
+                // A pending bulk row belongs to the bulk feed.
                 return false;
             }
             $runs = Auto_Alt_Text_Activator::get_runs_table_name();
@@ -164,6 +171,118 @@ class Auto_Alt_Text_Queue {
         // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
     }
 
+    /**
+     * Queues an explicit bulk-action job for an attachment and returns the job
+     * that now carries it. An active job is taken over, not duplicated: a
+     * pending automatic job is re-typed, a pending library-run job is released
+     * from its run and reset; a processing job is only tracked.
+     *
+     * @return array{job_id:int,new:bool}|null Null for an invalid attachment id (or a failed insert).
+     */
+    public function enqueue_bulk(int $attachment_id, string $generation_type = 'batch'): ?array {
+        global $wpdb;
+        Auto_Alt_Text_Activator::maybe_upgrade(true);
+        if ($attachment_id <= 0) {
+            return null;
+        }
+        $generation_type = sanitize_key($generation_type);
+        $table = self::get_table_name();
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+        $active = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, run_id, status, generation_type FROM {$table} WHERE attachment_id = %d AND status IN (%s, %s) LIMIT 1",
+            $attachment_id, self::STATUS_PENDING, self::STATUS_PROCESSING
+        ));
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+
+        if ($active) {
+            $job_id = (int) $active->id;
+            if (self::STATUS_PENDING !== $active->status) {
+                return ['job_id' => $job_id, 'new' => false];
+            }
+            $now = current_time('mysql', true);
+            if (null === $active->run_id) {
+                if ($active->generation_type !== $generation_type) {
+                    // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+                    $wpdb->query($wpdb->prepare(
+                        "UPDATE {$table} SET generation_type = %s, updated_at = %s WHERE id = %d AND status = %s AND run_id IS NULL",
+                        $generation_type, $now, $job_id, self::STATUS_PENDING
+                    ));
+                    // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+                }
+            } else {
+                // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
+                $wpdb->query($wpdb->prepare(
+                    "UPDATE {$table} SET run_id = NULL, generation_type = %s, attempts = 0, last_error = NULL, next_attempt_at = %s, updated_at = %s
+                     WHERE id = %d AND status = %s AND run_id IS NOT NULL",
+                    $generation_type, $now, $now, $job_id, self::STATUS_PENDING
+                ));
+                // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+            }
+            // A guarded UPDATE that matched nothing means the row was claimed meanwhile: still the same job.
+            return ['job_id' => $job_id, 'new' => false];
+        }
+
+        $now = current_time('mysql', true);
+        $inserted = $wpdb->insert($table, [
+            'attachment_id'   => $attachment_id,
+            'generation_type' => $generation_type,
+            'status'          => self::STATUS_PENDING,
+            'attempts'        => 0,
+            'next_attempt_at' => $now,
+            'created_at'      => $now,
+            'updated_at'      => $now,
+        ], ['%d', '%s', '%s', '%d', '%s', '%s', '%s']);
+
+        return $inserted ? ['job_id' => (int) $wpdb->insert_id, 'new' => true] : null;
+    }
+
+    /**
+     * Skips pending bulk jobs the user cancelled. Only pending, run-less rows of
+     * a bulk type are touched; a processing job finishes, a run job belongs to its run.
+     *
+     * @param array<int> $job_ids
+     * @return int Rows changed.
+     */
+    public function cancel_pending(array $job_ids): int {
+        global $wpdb;
+        $job_ids = array_values(array_unique(array_filter(array_map('intval', $job_ids), static function (int $id): bool {
+            return $id > 0;
+        })));
+        if (empty($job_ids)) {
+            return 0;
+        }
+        $table = self::get_table_name();
+        $id_placeholders   = implode(', ', array_fill(0, count($job_ids), '%d'));
+        $type_placeholders = implode(', ', array_fill(0, count(self::BULK_TYPES), '%s'));
+        $args = array_merge(
+            [self::STATUS_SKIPPED, self::CANCELLED_ERROR, current_time('mysql', true)],
+            $job_ids,
+            [self::STATUS_PENDING],
+            self::BULK_TYPES
+        );
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and generated placeholders only.
+        return (int) $wpdb->query($wpdb->prepare(
+            "UPDATE {$table} SET status = %s, last_error = %s, updated_at = %s
+             WHERE id IN ({$id_placeholders}) AND status = %s AND run_id IS NULL AND generation_type IN ({$type_placeholders})",
+            $args
+        ));
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+    }
+
+    /** Number of pending bulk jobs that are due now (the bulk feed's work). */
+    public static function due_bulk_count(): int {
+        global $wpdb;
+        $table = self::get_table_name();
+        $type_placeholders = implode(', ', array_fill(0, count(self::BULK_TYPES), '%s'));
+        $args = array_merge([self::STATUS_PENDING], self::BULK_TYPES, [current_time('mysql', true)]);
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name and generated placeholders only.
+        return (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$table} WHERE status = %s AND run_id IS NULL AND generation_type IN ({$type_placeholders}) AND next_attempt_at <= %s",
+            $args
+        ));
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+    }
+
     /** Sets a job's context hint when a new one is given; the newest hint wins. */
     private function add_context_hint($job_id, $context_post_id) {
         if (!$context_post_id) {
@@ -186,10 +305,12 @@ class Auto_Alt_Text_Queue {
         global $wpdb;
         $table = self::get_table_name();
         $generation_type = sanitize_key($generation_type);
+        // phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Internal table name only.
         $job = $wpdb->get_row($wpdb->prepare(
-            "SELECT id, generation_type FROM {$table} WHERE attachment_id = %d AND status = %s LIMIT 1",
+            "SELECT id, generation_type FROM {$table} WHERE attachment_id = %d AND status = %s AND run_id IS NULL LIMIT 1",
             (int) $attachment_id, self::STATUS_PENDING
         ));
+        // phpcs:enable WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
         if (!$job) {
             return false;
         }
@@ -451,7 +572,8 @@ class Auto_Alt_Text_Queue {
                 ? Auto_Alt_Text_Provenance::POLICY_MISSING
                 : Auto_Alt_Text_Provenance::default_policy();
             if (!Auto_Alt_Text_Provenance::allows_overwrite($attachment_id, $policy)) {
-                $this->finish($job, self::STATUS_DONE);
+                // An explicit request that was not carried out is skipped; an automatic job is simply done.
+                $this->finish($job, in_array($job->generation_type, self::AUTO_GENERATION_TYPES, true) ? self::STATUS_DONE : self::STATUS_SKIPPED);
                 return true;
             }
         }
