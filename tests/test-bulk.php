@@ -109,8 +109,13 @@ class Auto_Alt_Text_Bulk_Test extends WP_UnitTestCase {
         $this->assertSame('aat_bulk_empty', Auto_Alt_Text_Bulk::request($this->editor, [])->get_error_code());
 
         update_user_meta($this->editor, Auto_Alt_Text_Bulk::META_KEY, [
-            'started_at' => time(), 'finished_at' => null, 'job_ids' => range(100001, 104999),
+            'started_at' => time(), 'finished_at' => null, 'job_ids' => range(100001, 104998),
         ]);
+        $real = $this->images(1);
+        (new Auto_Alt_Text_Queue())->enqueue_bulk($real[0], 'batch');
+        $meta = $this->meta($this->editor);
+        $meta['job_ids'][] = (int) $this->row_for($real[0])->id;
+        update_user_meta($this->editor, Auto_Alt_Text_Bulk::META_KEY, $meta);
         $full = Auto_Alt_Text_Bulk::request($this->editor, $this->images(2));
         $this->assertWPError($full);
         $this->assertSame('aat_bulk_tracked_full', $full->get_error_code());
@@ -154,13 +159,30 @@ class Auto_Alt_Text_Bulk_Test extends WP_UnitTestCase {
         $rest = $this->meta($this->editor)['job_ids'];
         global $wpdb;
         $wpdb->query('UPDATE ' . Auto_Alt_Text_Queue::get_table_name() . " SET status = 'done'");
-        $this->assertSame('finished', Auto_Alt_Text_Bulk::progress($this->editor)['state']);
+        // Finished but never polled: request() refreshes it itself and replaces it.
+        $this->assertNull($this->meta($this->editor)['finished_at'] ?? null);
 
         Auto_Alt_Text_Bulk::request($this->editor, $this->images(1));
         $meta = $this->meta($this->editor);
         $this->assertCount(1, $meta['job_ids']);
         $this->assertNull($meta['finished_at']);
         $this->assertNotContains($rest[0], $meta['job_ids']);
+    }
+
+    public function test_large_finished_unpolled_bulk_is_replaced_not_capped() {
+        $done = $this->images(1);
+        Auto_Alt_Text_Bulk::request($this->editor, $done);
+        $this->set_row($done[0], ['status' => 'done']);
+        $meta = $this->meta($this->editor);
+        $meta['job_ids'] = array_merge($meta['job_ids'], range(100001, 104999));
+        update_user_meta($this->editor, Auto_Alt_Text_Bulk::META_KEY, $meta);
+        $this->assertNull($this->meta($this->editor)['finished_at'] ?? null);
+
+        $new = $this->images(2);
+        $result = Auto_Alt_Text_Bulk::request($this->editor, $new);
+        $this->assertIsArray($result);
+        $this->assertSame(2, $result['queued']);
+        $this->assertCount(2, $this->meta($this->editor)['job_ids']);
     }
 
     public function test_progress_counts() {

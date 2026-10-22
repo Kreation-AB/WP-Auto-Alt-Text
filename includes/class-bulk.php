@@ -68,8 +68,9 @@ class Auto_Alt_Text_Bulk {
             return new WP_Error('aat_bulk_no_key', __('Ange en API-nyckel under Inställningar → Anslutning för att generera alt-text.', 'WP-Auto-Alt-Text'), ['status' => 409]);
         }
 
-        $existing = self::load($user_id);
-        if (null !== $existing && null === $existing['finished_at'] && count($existing['job_ids']) + count($ids) > self::MAX_TRACKED) {
+        // Refresh first: progress() marks a finished bulk, which is then replaced, not counted against the cap.
+        $current = null !== self::progress($user_id) ? self::load($user_id) : null;
+        if (null !== $current && null === $current['finished_at'] && count($current['job_ids']) + count($ids) > self::MAX_TRACKED) {
             return new WP_Error('aat_bulk_tracked_full', __('Vänta tills den pågående genereringen är klar, eller använd Hela biblioteket.', 'WP-Auto-Alt-Text'), ['status' => 400]);
         }
 
@@ -97,7 +98,6 @@ class Auto_Alt_Text_Bulk {
 
         if (!empty($job_ids)) {
             // A finished (or hidden) bulk is replaced; one still in progress grows.
-            $current = null !== $existing && null !== self::progress($user_id) ? self::load($user_id) : null;
             if (null !== $current && null === $current['finished_at']) {
                 $job_ids = array_values(array_unique(array_merge($current['job_ids'], $job_ids)));
                 $started = $current['started_at'];
