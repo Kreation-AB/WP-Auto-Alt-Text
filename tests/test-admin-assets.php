@@ -10,6 +10,8 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
         wp_dequeue_script('auto-alt-text-settings');
         wp_deregister_script('auto-alt-text-settings');
         remove_filter('script_loader_tag', 'auto_alt_text_settings_module_tag', 10);
+        wp_dequeue_script('auto-alt-text-media-library');
+        wp_deregister_script('auto-alt-text-media-library');
         wp_dequeue_script('auto-alt-text-admin-js');
         wp_dequeue_style('auto_alt_text_css');
         // Localized data accumulates on the registered handle; start each test clean.
@@ -115,5 +117,36 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
         $this->assertDoesNotMatchRegularExpression('/(^|\})\s*\.tablenav \.tablenav-pages\s*\{/m', $css);
         $this->assertStringContainsString('.aat-stats-page .tablenav .tablenav-pages', $css);
         $this->assertStringNotContainsString('disabled-field', $css, 'Nothing renders that class any more');
+    }
+
+    public function test_media_library_module_loads_on_upload_only() {
+        do_action('admin_enqueue_scripts', 'post.php');
+        $this->assertFalse(wp_script_is('auto-alt-text-media-library', 'enqueued'));
+        do_action('admin_enqueue_scripts', 'upload.php');
+        $this->assertTrue(wp_script_is('auto-alt-text-media-library', 'enqueued'));
+        $this->assertSame(AUTO_ALT_TEXT_VERSION, wp_scripts()->registered['auto-alt-text-media-library']->ver);
+    }
+
+    public function test_module_tag_targets_the_handles_own_script_not_its_before_inline_script() {
+        $before = "<script id='auto-alt-text-media-library-js-before'>\nvar aatMediaLibrary = {};\n</script>\n";
+        $main = "<script src='https://example.test/media-library.js?ver=2' id='auto-alt-text-media-library-js'></script>\n";
+        $out = Auto_Alt_Text_Admin::module_tag($before . $main, 'auto-alt-text-media-library');
+        $this->assertSame(1, substr_count($out, 'type="module"'));
+        $this->assertMatchesRegularExpression('/<script type="module"[^>]*id=\'auto-alt-text-media-library-js\'/', $out);
+        $this->assertStringStartsWith("<script id='auto-alt-text-media-library-js-before'>", $out);
+        $this->assertSame($main, Auto_Alt_Text_Admin::module_tag($main, 'other-handle'));
+    }
+
+    public function test_media_library_config_is_json_with_real_values() {
+        do_action('admin_enqueue_scripts', 'upload.php');
+        $before = implode("\n", array_filter((array) wp_scripts()->get_data('auto-alt-text-media-library', 'before')));
+        $this->assertSame(1, preg_match('/aatMediaLibrary = (\{.*\});/s', $before, $m));
+        $cfg = json_decode($m[1], true);
+        $this->assertIsArray($cfg);
+        $this->assertSame(rest_url('wp-auto-alt-text/v1/bulk'), $cfg['restUrl']);
+        $this->assertSame(5, $cfg['pollSeconds']);
+        $this->assertNotEmpty($cfg['nonce']);
+        $this->assertSame(1, wp_verify_nonce($cfg['nonce'], 'wp_rest') ? 1 : 0);
+        $this->assertSame(Auto_Alt_Text_Bulk_Notice::strings(), $cfg['i18n']);
     }
 }

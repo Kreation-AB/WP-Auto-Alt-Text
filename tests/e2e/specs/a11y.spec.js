@@ -75,4 +75,25 @@ test.describe( 'accessibility', () => {
 		await expect( page.locator( '#preview-title' ) ).toBeVisible();
 		await checkA11y( page, { pageName: 'preview-dialog', include: '.alt-text-preview-dialog' } );
 	} );
+
+	test( 'bulk progress notice has none while running and when finished', async ( { page } ) => {
+		for ( let i = 0; i < 2; i++ ) {
+			ids.push( ( await requestUtils.uploadMedia( SAMPLE ) ).id );
+		}
+		await page.goto( '/wp-admin/upload.php?mode=list' );
+		for ( const id of ids ) {
+			await page.locator( `#cb-select-${ id }` ).check();
+		}
+		await page.locator( '#bulk-action-selector-top' ).selectOption( 'generate_alt_text' );
+		await page.locator( '#doaction' ).click();
+		await expect( page.locator( '#aat-bulk-notice[data-state="running"]' ) ).toBeVisible();
+		await checkA11y( page, { pageName: 'bulk-notice', include: '#aat-bulk-notice' } );
+
+		for ( let i = 0; i < 5; i++ ) {
+			wpCli( [ 'cron', 'event', 'run', 'aat_queue_tick' ] );
+		}
+		await expect( page.locator( '#aat-bulk-notice[data-state="finished"]' ) ).toBeVisible( { timeout: 20000 } );
+		await checkA11y( page, { pageName: 'bulk-notice', include: '#aat-bulk-notice' } );
+		await page.locator( '.aat-bulk-dismiss' ).click();
+	} );
 } );

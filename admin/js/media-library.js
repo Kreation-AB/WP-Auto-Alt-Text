@@ -1,0 +1,409 @@
+/**
+ * Media Library: keeps the bulk progress notice (#aat-bulk-notice) up to date.
+ * PHP prints the notice first (it works without JS); this module polls the
+ * REST route and re-renders the same structure. Nothing from the API is
+ * inserted as HTML: text goes through textContent and links through href.
+ */
+const cfg = window.aatMediaLibrary || {};
+const t = cfg.i18n || {};
+const links = cfg.links || {};
+const LIVE_MIN_INTERVAL_MS = 30000;
+const NBSP = ' ';
+
+let timer = null;
+let busy = false;
+let stopped = false;
+let seq = 0;
+let lastState = null;
+let lastLiveText = '';
+let lastLiveAt = 0;
+let latest = null;
+let failuresKey = '';
+
+const $ = (id) => document.getElementById('aat-bulk-' + id);
+const root = () => document.getElementById('aat-bulk-notice');
+const part = (selector) => (root() ? root().querySelector(selector) : null);
+
+function sprintf(template, ...args) {
+	let next = 0;
+	return String(template).replace(/%(?:(\d+)\$)?[sd]/g, (match, pos) => {
+		const value = args[pos ? Number(pos) - 1 : next++];
+		return value === undefined ? '' : String(value);
+	});
+}
+
+function fmtInt(n) {
+	return String(Math.round(Number(n) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
+}
+
+function setText(el, text) {
+	if (el && el.textContent !== text) {
+		el.textContent = text;
+	}
+}
+
+/** The server sends get_the_title() output: entity-encoded. A textarea decodes it without parsing tags. */
+function decodeEntities(text) {
+	const area = document.createElement('textarea');
+	area.innerHTML = String(text);
+	return area.value;
+}
+
+function url(path) {
+	return cfg.restUrl + (path || '');
+}
+
+async function api(method, path) {
+	const response = await fetch(url(path), {
+		method,
+		credentials: 'same-origin',
+		headers: { 'X-WP-Nonce': cfg.nonce, 'Content-Type': 'application/json' },
+	});
+	if (!response.ok) {
+		const error = new Error('HTTP ' + response.status);
+		error.status = response.status;
+		throw error;
+	}
+	return response.json();
+}
+
+/* ---- Text ---- */
+
+function summaryText(p) {
+	if (p.state === 'finished') {
+		const written = Number(p.written) || 0;
+		const parts = [written === 0 ? t.finished_none : written === 1 ? t.finished_one : sprintf(t.finished_many, fmtInt(written))];
+		['skipped', 'failed', 'cancelled'].forEach((key) => {
+			if (Number(p[key]) > 0) {
+				parts.push(sprintf(t[key], fmtInt(p[key])));
+			}
+		});
+		if (Number(p.removed) > 0) {
+			parts.push(Number(p.removed) === 1 ? t.removed_one : sprintf(t.removed_many, fmtInt(p.removed)));
+		}
+		return parts.join(' ');
+	}
+	if (String(p.state).indexOf('paused_') === 0) {
+		return t[p.state] || t.paused_auth;
+	}
+	const text = sprintf(t.running, fmtInt(p.total - p.pending), fmtInt(p.total));
+	return p.stalled ? text : text + ' ' + t.leave;
+}
+
+function noticeClass(p) {
+	if (p.state === 'finished') {
+		return Number(p.failed) > 0 ? 'notice-warning' : 'notice-success';
+	}
+	return String(p.state).indexOf('paused_') === 0 ? 'notice-warning' : 'notice-info';
+}
+
+/* ---- DOM ---- */
+
+function el(tag, className, id) {
+	const node = document.createElement(tag);
+	if (className) {
+		node.className = className;
+	}
+	if (id) {
+		node.id = id;
+	}
+	return node;
+}
+
+function link(className, text, href) {
+	const a = el('a', className);
+	a.textContent = text;
+	a.href = href || '#';
+	return a;
+}
+
+/** The structure PHP prints (Auto_Alt_Text_Bulk_Notice::html), for notices created by JS. */
+function buildNotice() {
+	const notice = el('div', 'notice aat-bulk-notice', 'aat-bulk-notice');
+	notice.appendChild(el('p', '', 'aat-bulk-summary'));
+	const progress = el('progress', 'aat-bulk-progress', 'aat-bulk-progress');
+	progress.setAttribute('aria-labelledby', 'aat-bulk-summary');
+	notice.appendChild(progress);
+	notice.appendChild(el('p', 'aat-bulk-retrying'));
+	notice.appendChild(el('p', 'aat-bulk-stalled'));
+	const pause = el('p', 'aat-bulk-pause-link');
+	pause.appendChild(link('', '', ''));
+	notice.appendChild(pause);
+	const details = el('details', 'aat-bulk-failures');
+	const summary = el('summary');
+	summary.textContent = t.failures_toggle;
+	details.appendChild(summary);
+	details.appendChild(el('ul'));
+	notice.appendChild(details);
+	const controls = el('p', 'aat-bulk-controls');
+	controls.appendChild(link('aat-bulk-refresh', t.refresh, window.location.href));
+	controls.appendChild(document.createTextNode(' '));
+	controls.appendChild(link('aat-bulk-cancel', t.cancel, links.cancel));
+	controls.appendChild(document.createTextNode(' '));
+	controls.appendChild(link('aat-bulk-dismiss', t.hide, links.dismiss));
+	notice.appendChild(controls);
+	const live = el('p', 'screen-reader-text', 'aat-bulk-live');
+	live.setAttribute('aria-live', 'polite');
+	live.setAttribute('aria-atomic', 'true');
+	notice.appendChild(live);
+	return notice;
+}
+
+function insertNotice(notice) {
+	const wrap = document.querySelector('.wrap');
+	const anchor = wrap && wrap.querySelector('.wp-header-end');
+	if (anchor) {
+		anchor.insertAdjacentElement('afterend', notice);
+	} else if (wrap) {
+		wrap.insertBefore(notice, wrap.firstChild);
+	} else {
+		document.body.insertBefore(notice, document.body.firstChild);
+	}
+	bind(notice);
+}
+
+function renderFailures(p) {
+	const details = part('.aat-bulk-failures');
+	const list = details.querySelector('ul');
+	const failures = p.state === 'finished' && Array.isArray(p.failures) ? p.failures : [];
+	const key = JSON.stringify(failures);
+	details.hidden = failures.length === 0;
+	if (key === failuresKey) {
+		return;
+	}
+	failuresKey = key;
+	list.textContent = '';
+	failures.forEach((failure) => {
+		const li = el('li');
+		const a = el('a');
+		a.textContent = decodeEntities(failure.title);
+		a.href = failure.edit_url;
+		const span = el('span');
+		span.textContent = String(failure.message);
+		li.appendChild(a);
+		li.appendChild(document.createTextNode(' '));
+		li.appendChild(span);
+		list.appendChild(li);
+	});
+}
+
+/** Creates the notice when it is missing, otherwise updates it in place. */
+function renderNotice(p) {
+	if (!root()) {
+		insertNotice(buildNotice());
+	}
+	const notice = root();
+	const finished = p.state === 'finished';
+	const paused = String(p.state).indexOf('paused_') === 0;
+	notice.classList.remove('notice-info', 'notice-warning', 'notice-success');
+	notice.classList.add(noticeClass(p));
+	notice.dataset.state = p.state;
+	setText($('summary'), summaryText(p));
+
+	const progress = $('progress');
+	progress.max = Number(p.total) || 0;
+	progress.value = Math.max(0, (Number(p.total) || 0) - (Number(p.pending) || 0));
+	progress.hidden = finished;
+
+	const retrying = part('.aat-bulk-retrying');
+	const showRetry = !finished && !paused && Number(p.retrying) > 0;
+	setText(retrying, showRetry ? sprintf(t.retrying, fmtInt(p.retrying)) : '');
+	retrying.hidden = !showRetry;
+
+	const stalled = part('.aat-bulk-stalled');
+	const showStalled = !finished && !paused && Boolean(p.stalled);
+	setText(stalled, showStalled ? t.stalled : '');
+	stalled.hidden = !showStalled;
+
+	const pause = part('.aat-bulk-pause-link');
+	const pauseLink = pause.querySelector('a');
+	if (p.state === 'paused_connector' && links.connector) {
+		pauseLink.textContent = t.open_approval;
+		pauseLink.href = links.connector;
+		pause.hidden = false;
+	} else if ((p.state === 'paused_auth' || p.state === 'paused_no_key') && links.connection) {
+		pauseLink.textContent = t.open_connection;
+		pauseLink.href = links.connection;
+		pause.hidden = false;
+	} else {
+		pause.hidden = true;
+	}
+
+	renderFailures(p);
+
+	// With JS the page updates itself, so the manual refresh link goes away.
+	part('.aat-bulk-refresh').hidden = true;
+	part('.aat-bulk-cancel').hidden = finished || Number(p.pending) < 1;
+	setText(part('.aat-bulk-dismiss'), finished ? t.close : t.hide);
+	announceFor(p);
+}
+
+/* ---- Live region ---- */
+
+function announce(text, force) {
+	const now = Date.now();
+	if (!text || text === lastLiveText) {
+		return;
+	}
+	if (!force && now - lastLiveAt < LIVE_MIN_INTERVAL_MS) {
+		return;
+	}
+	setText($('live'), text);
+	lastLiveText = text;
+	lastLiveAt = now;
+}
+
+/** State changes are announced at once, progress at most every 30 s. */
+function announceFor(p) {
+	const changed = lastState !== null && lastState !== p.state;
+	lastState = p.state;
+	announce(summaryText(p), changed);
+}
+
+/* ---- Polling ---- */
+
+function wantsPolling() {
+	return !stopped && root() !== null && latest !== null && latest.state !== 'finished';
+}
+
+function schedule() {
+	window.clearTimeout(timer);
+	timer = null;
+	if (wantsPolling() && document.visibilityState === 'visible') {
+		timer = window.setTimeout(poll, (Number(cfg.pollSeconds) || 5) * 1000);
+	}
+}
+
+function expire() {
+	stopped = true;
+	window.clearTimeout(timer);
+	setText($('summary'), t.session_expired);
+	announce(t.session_expired, true);
+}
+
+function apply(bulk) {
+	latest = bulk;
+	if (bulk === null) {
+		const notice = root();
+		if (notice) {
+			notice.remove();
+		}
+		return;
+	}
+	renderNotice(bulk);
+}
+
+async function poll() {
+	if (busy || stopped) {
+		return;
+	}
+	busy = true;
+	const mine = ++seq;
+	try {
+		const response = await api('GET', '');
+		if (mine === seq) {
+			apply(response.bulk);
+		}
+		// Only a stalled bulk is moved from this tab, once per poll, never in parallel.
+		if (mine === seq && latest && latest.state === 'running' && latest.stalled) {
+			try {
+				const ticked = await api('POST', '/tick');
+				if (mine === seq) {
+					apply(ticked.bulk);
+				}
+			} catch (error) {
+				if (error.status === 401 || error.status === 403) {
+					throw error;
+				}
+				// 409: nothing left to run. Other errors: try again on the next poll.
+			}
+		}
+	} catch (error) {
+		if (error.status === 401 || error.status === 403) {
+			expire();
+		}
+	} finally {
+		busy = false;
+		schedule();
+	}
+}
+
+/* ---- Controls ---- */
+
+function focusHeading() {
+	const heading = document.querySelector('#wpbody-content h1');
+	if (heading) {
+		if (!heading.hasAttribute('tabindex')) {
+			heading.setAttribute('tabindex', '-1');
+		}
+		heading.focus();
+	}
+}
+
+async function control(path, event) {
+	event.preventDefault();
+	if (busy || stopped) {
+		return;
+	}
+	busy = true;
+	seq++;
+	const href = event.currentTarget.href;
+	try {
+		const response = await api('POST', path);
+		if (path === '/dismiss') {
+			apply(null);
+			focusHeading();
+		} else {
+			apply(response.bulk);
+		}
+	} catch (error) {
+		if (error.status === 401 || error.status === 403) {
+			expire();
+		} else if (href && href !== '#') {
+			// Anything else: the nonce-protected admin-post link does the same job.
+			window.location.href = href;
+		}
+	} finally {
+		busy = false;
+		schedule();
+	}
+}
+
+function bind(notice) {
+	const cancel = notice.querySelector('.aat-bulk-cancel');
+	const dismiss = notice.querySelector('.aat-bulk-dismiss');
+	if (cancel) {
+		cancel.addEventListener('click', (event) => control('/cancel', event));
+	}
+	if (dismiss) {
+		dismiss.addEventListener('click', (event) => control('/dismiss', event));
+	}
+}
+
+function init() {
+	if (!cfg.restUrl) {
+		return;
+	}
+	const notice = root();
+	if (notice) {
+		// Baseline from the server-rendered notice: no announcement for what the page already says.
+		lastState = notice.dataset.state || null;
+		lastLiveAt = Date.now();
+		latest = { state: lastState };
+		bind(notice);
+		const refresh = notice.querySelector('.aat-bulk-refresh');
+		if (refresh) {
+			refresh.hidden = true;
+		}
+		if (lastState !== 'finished') {
+			poll();
+		}
+	}
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState === 'visible' && wantsPolling() && !busy) {
+			poll();
+		}
+	});
+}
+
+init();

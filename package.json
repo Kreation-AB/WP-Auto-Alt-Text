@@ -9,7 +9,7 @@
     "env:start": "wp-env start",
     "env:stop": "wp-env stop",
     "test:e2e": "playwright test --config tests/e2e/playwright.config.js",
-    "lint:js": "node --check admin/js/app.js && node --check admin/js/settings.js",
+    "lint:js": "for f in admin/js/*.js; do node --check \"$f\" || exit 1; done",
     "wp": "wp-env run tests-cli wp"
   },
   "devDependencies": {

@@ -659,3 +659,25 @@
     transition: none;
   }
 }
+
+/* Bulk progress notice on the Media Library */
+.aat-bulk-notice [hidden] {
+  display: none !important;
+}
+.aat-bulk-notice .aat-bulk-progress {
+  display: block;
+  width: 100%;
+  max-width: 480px;
+  height: 14px;
+  margin: 0 0 8px;
+}
+.aat-bulk-notice .aat-bulk-failures {
+  margin: 0 0 8px;
+}
+.aat-bulk-notice .aat-bulk-failures ul {
+  margin: 6px 0 0 18px;
+  list-style: disc;
+}
+.aat-bulk-notice .aat-bulk-controls a + a {
+  margin-left: 12px;
+}

@@ -5,6 +5,11 @@ class Auto_Alt_Text_Admin {
     private const SCRIPT_PATH = 'js/app.js';
     private const STYLE_HANDLE = 'auto_alt_text_css';
 
+    private const MEDIA_LIBRARY_HANDLE = 'auto-alt-text-media-library';
+
+    /** Script handles loaded as ES modules by module_tag(). */
+    public const MODULE_HANDLES = [self::MEDIA_LIBRARY_HANDLE];
+
     /** Core screens that host the media modal or the Media Library. */
     private const MEDIA_SCREENS = ['upload.php', 'post.php', 'post-new.php'];
 
@@ -26,6 +31,7 @@ class Auto_Alt_Text_Admin {
         add_filter('handle_bulk_actions-upload', [$this, 'handle_bulk_actions'], 10, 3);
         add_filter('removable_query_args', [$this, 'add_removable_query_args']);
         add_action('admin_enqueue_scripts', [$this, 'enqueueAutoAltTextScript']);
+        add_filter('script_loader_tag', [self::class, 'module_tag'], 10, 2);
         // The Generate button is rendered in every wp.media modal (site editor,
         // widgets, customizer, term screens...), not only on MEDIA_SCREENS.
         add_action('wp_enqueue_media', [$this, 'enqueue_media_modal_assets']);
@@ -95,6 +101,51 @@ class Auto_Alt_Text_Admin {
             return;
         }
         $this->enqueue_assets();
+        if ('upload.php' === (string) $hook_suffix) {
+            $this->enqueue_media_library_module();
+        }
+    }
+
+    /**
+     * Adds type="module" to the main <script> of a module handle. The tag can
+     * also hold the handle's `before` inline script, which has to stay classic,
+     * so only the element whose id is "{handle}-js" is changed.
+     */
+    public static function module_tag($tag, $handle): string {
+        $tag = (string) $tag;
+        if (!in_array($handle, self::MODULE_HANDLES, true)) {
+            return $tag;
+        }
+        $id = $handle . '-js';
+        return (string) preg_replace_callback('/<script\b[^>]*>/i', static function (array $m) use ($id): string {
+            if (!preg_match('/\sid=([\'"])' . preg_quote($id, '/') . '\1/', $m[0])) {
+                return $m[0];
+            }
+            $open = (string) preg_replace('/\s+type=([\'"])[^\'"]*\1/', '', $m[0]);
+            return '<script type="module"' . substr($open, 7);
+        }, $tag);
+    }
+
+    /** The Media Library's progress notice script and its JSON config (upload.php only). */
+    private function enqueue_media_library_module(): void {
+        if (wp_script_is(self::MEDIA_LIBRARY_HANDLE, 'enqueued')) {
+            return;
+        }
+        wp_enqueue_script(
+            self::MEDIA_LIBRARY_HANDLE,
+            plugin_dir_url(__FILE__) . 'js/media-library.js',
+            [],
+            AUTO_ALT_TEXT_VERSION,
+            true
+        );
+        $config = [
+            'restUrl'     => rest_url('wp-auto-alt-text/v1/bulk'),
+            'nonce'       => wp_create_nonce('wp_rest'),
+            'pollSeconds' => 5,
+            'i18n'        => Auto_Alt_Text_Bulk_Notice::strings(),
+            'links'       => Auto_Alt_Text_Bulk_Notice::links(),
+        ];
+        wp_add_inline_script(self::MEDIA_LIBRARY_HANDLE, 'var aatMediaLibrary = ' . wp_json_encode($config) . ';', 'before');
     }
 
     /**

@@ -126,6 +126,7 @@ class WP_Auto_Alt_Text_Plugin {
 		require_once __DIR__ . '/includes/class-library-runner.php';
 		require_once __DIR__ . '/includes/class-bulk.php';
 		require_once __DIR__ . '/includes/class-coexistence.php';
+		require_once __DIR__ . '/includes/class-bulk-notice.php';
 		require_once __DIR__ . '/includes/class-library-report.php';
 		require_once __DIR__ . '/includes/class-library-page.php';
 		require_once __DIR__ . '/includes/class-settings-page.php';
@@ -183,6 +184,7 @@ class WP_Auto_Alt_Text_Plugin {
 		add_action('admin_notices', ['Auto_Alt_Text_Quota_Monitor', 'render_admin_notice']);
 		add_action('admin_notices', ['Auto_Alt_Text_Connector_Status', 'render_admin_notice']);
 		add_action('admin_notices', ['Auto_Alt_Text_Key_Status', 'render_admin_notice']);
+		add_action('admin_notices', ['Auto_Alt_Text_Bulk_Notice', 'render']);
 		add_action('admin_post_aat_check_key', ['Auto_Alt_Text_Key_Status', 'handle_check_request']);
 		add_action('admin_post_aat_clear_cache', ['Auto_Alt_Text_Cache_Manager', 'handle_clear_request']);
 		add_action('admin_post_aat_dismiss_quota_notice', ['Auto_Alt_Text_Quota_Monitor', 'handle_dismiss_request']);
