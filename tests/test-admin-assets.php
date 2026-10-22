@@ -214,7 +214,7 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
 
     public function test_stylesheets_only_define_aat_prefixed_plugin_classes() {
         $css = file_get_contents(dirname(__DIR__) . '/css/style.css');
-        $this->assertSame(0, preg_match('/^[.#](?!aat-)[A-Za-z]/m', $css), 'Every top-level selector in style.css starts with aat-');
+        $this->assertSame(0, preg_match('/^[.#](?!aat-|column-aat_)[A-Za-z]/m', $css), 'Every top-level selector in style.css starts with aat- (WordPress derives .column-aat_alt from the column key)');
         foreach (['status-badge', 'generation-type', 'edited-text', 'diff-view', 'format-status', 'log-level-', 'tooltip', 'char-count', 'alt-text-preview'] as $old) {
             $this->assertDoesNotMatchRegularExpression('/(?<!aat-)' . preg_quote($old, '/') . '/', $css, $old);
         }
