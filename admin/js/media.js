@@ -9,6 +9,8 @@
 const cfg = window.aatMedia || {};
 const t = cfg.i18n || {};
 const ALT_FIELDS = '#attachment-details-two-column-alt-text, #attachment-details-alt-text, #attachment_alt';
+/** The blocks that hold one attachment's fields together with its Generate button. */
+const FIELD_SCOPES = '.attachment-details, .media-sidebar, #post';
 const FEEDBACK_TYPES = [ 'more_descriptive', 'more_concise', 'more_accessible', 'better_seo', 'technical_accuracy' ];
 const ERROR_ID = 'aat-preview-error';
 
@@ -175,19 +177,33 @@ function regions( trigger ) {
 	return { status, error };
 }
 
-/** The Generate button for an attachment: the one clicked, or the one that replaced it. */
+function visible( node ) {
+	return Boolean( node && node.isConnected && node.getClientRects().length > 0 );
+}
+
+/**
+ * The Generate button of an attachment: the one clicked, or the one that
+ * replaced it (a visible one first). Null when the attachment is no longer
+ * on screen, for example after the media modal moved to another image.
+ */
 function triggerFor( state ) {
 	if ( state.trigger && state.trigger.isConnected ) {
 		return state.trigger;
 	}
-	return document.querySelector( '.aat-generate[data-attachment-id="' + state.attachmentId + '"]' );
+	const all = document.querySelectorAll( '.aat-generate[data-attachment-id="' + Number( state.attachmentId ) + '"]' );
+	return Array.prototype.find.call( all, visible ) || all[ 0 ] || null;
 }
 
+/**
+ * aria-disabled, not disabled: a disabled button would drop focus to the page,
+ * where the media modal's Alt+arrow keys move to another attachment.
+ */
 function setBusy( trigger, busy ) {
-	trigger.disabled = busy;
 	if ( busy ) {
+		trigger.setAttribute( 'aria-disabled', 'true' );
 		trigger.setAttribute( 'aria-busy', 'true' );
 	} else {
+		trigger.removeAttribute( 'aria-disabled' );
 		trigger.removeAttribute( 'aria-busy' );
 	}
 	const spinner = trigger.nextElementSibling;
@@ -242,20 +258,28 @@ async function generate( trigger ) {
 		cacheSet( attachmentId, text );
 		setBusy( trigger, false );
 		announce( live.status, '' );
+		// The modal may have moved to another attachment meanwhile: then the text
+		// waits in the session cache and the next click on this image offers it.
+		const target = triggerFor( { trigger, attachmentId } );
+		if ( ! visible( target ) ) {
+			return;
+		}
 		openPreview( {
 			attachmentId,
 			text,
 			context: typeof data.context === 'string' ? data.context : '',
 			cached: false,
-			trigger,
+			trigger: target,
 		} );
 	} catch ( error ) {
 		setBusy( trigger, false );
+		const target = triggerFor( { trigger, attachmentId } );
+		const targetLive = target === trigger ? live : regions( target );
 		announce( live.status, '' );
-		announce( live.error, errorText( t.generate_failed, error ) );
-		// Disabling the focused button dropped focus to the page.
-		if ( hadFocus && trigger.isConnected && focusLost() ) {
-			trigger.focus();
+		announce( targetLive.error, errorText( t.generate_failed, error ) );
+		// A re-rendered button replaced the focused one.
+		if ( hadFocus && target && focusLost() ) {
+			target.focus();
 		}
 	} finally {
 		pending = false;
@@ -332,6 +356,9 @@ function openPreview( { attachmentId, text, context, cached, trigger } ) {
 	if ( cached ) {
 		const regenerate = button( 'aat-preview-regenerate', t.regenerate );
 		regenerate.addEventListener( 'click', () => {
+			if ( state.busy ) {
+				return;
+			}
 			cacheDrop( attachmentId );
 			finish( state );
 			const next = triggerFor( state );
@@ -400,7 +427,7 @@ function finish( state ) {
 	}
 	state.dialog.remove();
 	const trigger = triggerFor( state );
-	if ( trigger && ! trigger.disabled ) {
+	if ( visible( trigger ) ) {
 		trigger.focus();
 		return;
 	}
@@ -410,12 +437,23 @@ function finish( state ) {
 	}
 }
 
-/** Disables the dialog's controls (not "Avbryt") while a request runs. */
+/**
+ * Marks the dialog's controls (not "Avbryt") unavailable while a request runs:
+ * buttons aria-disabled (their handlers check state.busy) and text fields
+ * read-only, so focus stays where it is instead of dropping out of the dialog.
+ */
 function setDialogBusy( state, busy, statusText ) {
 	state.busy = busy;
 	state.dialog.querySelectorAll( 'button, textarea' ).forEach( ( control ) => {
-		if ( ! control.classList.contains( 'aat-preview-cancel' ) ) {
-			control.disabled = busy;
+		if ( control.classList.contains( 'aat-preview-cancel' ) ) {
+			return;
+		}
+		if ( 'TEXTAREA' === control.tagName ) {
+			control.readOnly = busy;
+		} else if ( busy ) {
+			control.setAttribute( 'aria-disabled', 'true' );
+		} else {
+			control.removeAttribute( 'aria-disabled' );
 		}
 	} );
 	announce( state.status, statusText );
@@ -424,7 +462,7 @@ function setDialogBusy( state, busy, statusText ) {
 	}
 }
 
-/** Puts focus back into the dialog when disabling a control dropped it. */
+/** Puts focus back into the dialog if it left during a request (for example to a re-rendered page). */
 function refocus( state, control ) {
 	if ( current === state && control && ! state.dialog.contains( document.activeElement ) ) {
 		control.focus();
@@ -451,12 +489,32 @@ function clearFieldError( state, field ) {
 	}
 }
 
-/** Writes the saved text into the attachment's alt fields; `change` makes wp.media's model take it. */
-function writeAltFields( text ) {
-	document.querySelectorAll( ALT_FIELDS ).forEach( ( field ) => {
-		field.value = text;
-		field.dispatchEvent( new Event( 'change', { bubbles: true } ) );
-	} );
+/**
+ * Writes the saved text into the alt field of the same attachment only: the
+ * one in the block that holds its Generate button (the grid's details view,
+ * a media modal's sidebar, the attachment edit form). `change` makes
+ * wp.media's model take it. When the attachment is no longer on screen,
+ * nothing on screen is touched; its model is updated without saving again.
+ */
+function writeAltFields( state, text ) {
+	const trigger = triggerFor( state );
+	const scope = trigger ? trigger.closest( FIELD_SCOPES ) : null;
+	if ( scope ) {
+		scope.querySelectorAll( ALT_FIELDS ).forEach( ( field ) => {
+			field.value = text;
+			field.dispatchEvent( new Event( 'change', { bubbles: true } ) );
+		} );
+		return;
+	}
+	try {
+		const media = window.wp && window.wp.media;
+		const model = media && typeof media.attachment === 'function' ? media.attachment( state.attachmentId ) : null;
+		if ( model && typeof model.set === 'function' ) {
+			model.set( 'alt', text );
+		}
+	} catch ( e ) {
+		// No media models on this screen: the server copy is what counts.
+	}
 }
 
 async function apply( state, origin ) {
@@ -481,7 +539,7 @@ async function apply( state, origin ) {
 		} );
 		// The applied text is no longer an unapplied AI suggestion.
 		cacheDrop( state.attachmentId );
-		writeAltFields( typeof data.alt_text === 'string' && data.alt_text ? data.alt_text : value );
+		writeAltFields( state, typeof data.alt_text === 'string' && data.alt_text ? data.alt_text : value );
 		finish( state );
 		const trigger = triggerFor( state );
 		announce( trigger ? regions( trigger ).status : null, t.saved );
@@ -620,7 +678,7 @@ function hookMediaModals() {
 
 document.addEventListener( 'click', ( event ) => {
 	const trigger = event.target instanceof Element ? event.target.closest( '.aat-generate' ) : null;
-	if ( ! trigger || trigger.disabled ) {
+	if ( ! trigger || trigger.disabled || 'true' === trigger.getAttribute( 'aria-disabled' ) ) {
 		return;
 	}
 	event.preventDefault();

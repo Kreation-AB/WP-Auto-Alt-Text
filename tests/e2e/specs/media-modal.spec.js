@@ -5,6 +5,7 @@ const { respText, wpCli, getOption, restoreOption, provenance } = require( '../u
 
 const RESP_TEXT = respText();
 const SAMPLE = path.resolve( __dirname, '../assets/sample.jpg' );
+const HUMAN_TEXT = 'En text som en person skrev';
 
 /** Matches the admin-ajax request of one plugin action. */
 function isAjax( request, action ) {
@@ -175,6 +176,109 @@ test.describe( 'media modal', () => {
 		await expect( dialog.locator( '#aat-preview-text' ) ).toHaveValue( RESP_TEXT );
 		await dialog.locator( '.aat-preview-cancel' ).click();
 		await expect( dialog ).toHaveCount( 0 );
+	} );
+
+	/**
+	 * Uploads B (with a person's alt text), then A, dated after B so the grid's
+	 * details modal moves from A to B with its "next" button, and opens A.
+	 */
+	async function openNeighbours( page ) {
+		const b = await requestUtils.uploadMedia( SAMPLE );
+		ids.push( b.id );
+		await requestUtils.rest( { method: 'POST', path: `/wp/v2/media/${ b.id }`, data: { alt_text: HUMAN_TEXT } } );
+		const a = await requestUtils.uploadMedia( SAMPLE );
+		ids.push( a.id );
+		const later = new Date( Date.now() + 120000 ).toISOString().slice( 0, 19 );
+		await requestUtils.rest( { method: 'POST', path: `/wp/v2/media/${ a.id }`, data: { date_gmt: later } } );
+		await page.goto( '/wp-admin/upload.php?mode=grid' );
+		await page.goto( `/wp-admin/upload.php?item=${ a.id }` );
+		await expect( page.locator( `.aat-generate[data-attachment-id="${ a.id }"]` ) ).toBeVisible();
+		return { a: a.id, b: b.id };
+	}
+
+	/** Holds the matching admin-ajax request until release() is called. */
+	async function holdAjax( page, action ) {
+		let release;
+		const gate = new Promise( ( resolve ) => {
+			release = resolve;
+		} );
+		await page.route( '**/wp-admin/admin-ajax.php', async ( route ) => {
+			if ( isAjax( route.request(), action ) ) {
+				await gate;
+			}
+			await route.continue();
+		} );
+		return () => release();
+	}
+
+	test( 'a preview that arrives after moving to another image never writes into it', async ( { page } ) => {
+		const { a, b } = await openNeighbours( page );
+		const dialog = page.locator( 'dialog.aat-preview-dialog' );
+		const release = await holdAjax( page, 'generate_alt_text_for_attachment' );
+
+		const generateA = page.locator( `.aat-generate[data-attachment-id="${ a }"]` );
+		await generateA.focus();
+		await page.keyboard.press( 'Enter' );
+		// Busy without dropping focus: aria-disabled, not disabled.
+		await expect( generateA ).toHaveAttribute( 'aria-disabled', 'true' );
+		await expect( generateA ).not.toHaveAttribute( 'disabled' );
+		await expect( generateA ).toBeFocused();
+
+		// Core's "next" button moves the details modal to B while the request runs.
+		await page.locator( '.edit-media-header .right' ).click();
+		await expect( page ).toHaveURL( new RegExp( `item=${ b }` ) );
+		await expect( page.locator( '#attachment-details-two-column-alt-text' ) ).toHaveValue( HUMAN_TEXT );
+
+		const answered = page.waitForResponse( ( response ) => isAjax( response.request(), 'generate_alt_text_for_attachment' ) );
+		release();
+		await answered;
+		// A's text waits in the session cache; no dialog opens over B.
+		await expect.poll( () => page.evaluate( ( id ) => window.sessionStorage.getItem( 'aat_alt_' + id ), a ) ).toBe( RESP_TEXT );
+		await expect( dialog ).toHaveCount( 0 );
+		await expect( page.locator( '#attachment-details-two-column-alt-text' ) ).toHaveValue( HUMAN_TEXT );
+		expect( await altOf( b ) ).toBe( HUMAN_TEXT );
+		expect( await altOf( a ) ).toBe( '' );
+
+		// Back on A, the next click offers the cached text, and Apply writes A only.
+		await page.locator( '.edit-media-header .left' ).click();
+		await page.locator( `.aat-generate[data-attachment-id="${ a }"]` ).click();
+		await expect( dialog.locator( '.aat-preview-cached' ) ).toHaveText( '(från cache)' );
+		await dialog.locator( '.aat-preview-apply' ).click();
+		await expect( dialog ).toHaveCount( 0 );
+		await expect.poll( () => altOf( a ) ).toBe( RESP_TEXT );
+		await expect( page.locator( '#attachment-details-two-column-alt-text' ) ).toHaveValue( RESP_TEXT );
+		expect( await altOf( b ) ).toBe( HUMAN_TEXT );
+	} );
+
+	test( 'an Apply that finishes after Escape and moving on writes only its own image', async ( { page } ) => {
+		const { a, b } = await openNeighbours( page );
+		const dialog = page.locator( 'dialog.aat-preview-dialog' );
+
+		await page.locator( `.aat-generate[data-attachment-id="${ a }"]` ).click();
+		await expect( dialog.locator( '#aat-preview-text' ) ).toHaveValue( RESP_TEXT );
+		const release = await holdAjax( page, 'apply_alt_text' );
+		const apply = dialog.locator( '.aat-preview-apply' );
+		await apply.click();
+		// Saving keeps focus in the dialog.
+		await expect( apply ).toHaveAttribute( 'aria-disabled', 'true' );
+		await expect( apply ).toBeFocused();
+		await page.keyboard.press( 'Escape' );
+		await expect( dialog ).toHaveCount( 0 );
+
+		await page.locator( '.edit-media-header .right' ).click();
+		await expect( page ).toHaveURL( new RegExp( `item=${ b }` ) );
+		const answered = page.waitForResponse( ( response ) => isAjax( response.request(), 'apply_alt_text' ) );
+		release();
+		await answered;
+
+		await expect.poll( () => altOf( a ) ).toBe( RESP_TEXT );
+		await expect( page.locator( '#attachment-details-two-column-alt-text' ) ).toHaveValue( HUMAN_TEXT );
+		expect( await altOf( b ) ).toBe( HUMAN_TEXT );
+
+		// A's model took the saved text, so going back shows it.
+		await page.locator( '.edit-media-header .left' ).click();
+		await expect( page.locator( '#attachment-details-two-column-alt-text' ) ).toHaveValue( RESP_TEXT );
+		expect( await altOf( b ) ).toBe( HUMAN_TEXT );
 	} );
 
 	test( 'empty custom feedback shows an inline error', async ( { page } ) => {
