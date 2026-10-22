@@ -106,13 +106,11 @@ class Auto_Alt_Text_Ajax_Authorization_Test extends WP_Ajax_UnitTestCase {
         $this->assertSame(0, $this->openai_calls);
     }
 
-    public function test_batch_skips_attachments_the_user_cannot_edit() {
-        $response = $this->ajax('process_image_batch', [
-            'nonce' => wp_create_nonce('auto_alt_text_batch_nonce'),
-            'ids'   => wp_json_encode([$this->foreign_id]),
-        ]);
+    public function test_bulk_request_rejects_attachments_the_user_cannot_edit() {
+        $result = Auto_Alt_Text_Bulk::request(get_current_user_id(), [$this->foreign_id]);
 
-        $this->assertFalse($response['data'][$this->foreign_id]['success'], $this->_last_response);
+        $this->assertSame(0, $result['queued']);
+        $this->assertSame(1, $result['rejected']['no_permission']);
         $this->assertSame(0, $this->openai_calls);
         $this->assertSame('', get_post_meta($this->foreign_id, '_wp_attachment_image_alt', true));
     }

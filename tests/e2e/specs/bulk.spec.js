@@ -124,4 +124,73 @@ test.describe( 'bulk generation', () => {
 		await page.locator( '.aat-bulk-dismiss' ).click();
 		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
 	} );
+
+	test( 'grid bulk button queues the selection', async ( { page } ) => {
+		const errors = [];
+		page.on( 'pageerror', ( e ) => errors.push( e ) );
+		for ( let i = 0; i < 2; i++ ) {
+			ids.push( ( await requestUtils.uploadMedia( SAMPLE ) ).id );
+		}
+		let posts = 0;
+		await page.route( '**/wp-auto-alt-text/v1/bulk', async ( route ) => {
+			if ( route.request().method() === 'POST' ) {
+				posts++;
+				await new Promise( ( resolve ) => setTimeout( resolve, 500 ) );
+			}
+			await route.continue();
+		} );
+		await page.goto( '/wp-admin/upload.php?mode=grid' );
+
+		const button = page.locator( 'button.aat-grid-generate' );
+		await expect( button ).toBeHidden();
+		await page.locator( '.select-mode-toggle-button' ).click();
+		await expect( button ).toBeVisible();
+		await expect( button ).toBeDisabled();
+		await expect( button ).toHaveText( 'Generera alt-text för markerade' );
+
+		for ( const id of ids ) {
+			await page.locator( `.attachment[data-id="${ id }"]` ).click();
+		}
+		await expect( button ).toBeEnabled();
+
+		// Two quick clicks send one request.
+		await button.dblclick();
+		await expect( page.locator( '#aat-bulk-notice' ) ).toBeVisible();
+		await expect( page.locator( '#aat-bulk-notice' ) ).toContainText( 'Alt-text genereras i bakgrunden' );
+		expect( posts ).toBe( 1 );
+
+		for ( let i = 0; i < 5; i++ ) {
+			wpCli( [ 'cron', 'event', 'run', 'aat_queue_tick' ] );
+			if ( ( await altOf( ids[ 0 ] ) ) && ( await altOf( ids[ 1 ] ) ) ) {
+				break;
+			}
+		}
+		await expect( page.locator( '#aat-bulk-summary' ) ).toContainText( 'Klart: 2 bilder fick alt-text.', { timeout: 20000 } );
+		expect( await altOf( ids[ 0 ] ) ).toBe( RESP_TEXT );
+		expect( errors ).toEqual( [] );
+
+		await page.locator( '.aat-bulk-dismiss' ).click();
+		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
+	} );
+
+	test( 'grid bulk button shows a rejected request in the notice area', async ( { page } ) => {
+		ids.push( ( await requestUtils.uploadMedia( SAMPLE ) ).id );
+		await page.route( '**/wp-auto-alt-text/v1/bulk', ( route ) => {
+			if ( route.request().method() !== 'POST' ) {
+				return route.continue();
+			}
+			return route.fulfill( {
+				status: 409,
+				contentType: 'application/json',
+				body: JSON.stringify( { code: 'aat_bulk_no_key', message: 'Ange en API-nyckel för test.', data: { status: 409 } } ),
+			} );
+		} );
+		await page.goto( '/wp-admin/upload.php?mode=grid' );
+		await page.locator( '.select-mode-toggle-button' ).click();
+		await page.locator( `.attachment[data-id="${ ids[ 0 ] }"]` ).click();
+		await page.locator( 'button.aat-grid-generate' ).click();
+		await expect( page.locator( '#aat-grid-error' ) ).toContainText( 'Ange en API-nyckel för test.' );
+		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
+		await expect( page.locator( 'button.aat-grid-generate' ) ).toBeEnabled();
+	} );
 } );

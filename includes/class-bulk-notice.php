@@ -80,6 +80,8 @@ class Auto_Alt_Text_Bulk_Notice {
             'err_too_many'    => __('Markera högst 1 000 bilder åt gången. Använd Hela biblioteket för fler.', 'WP-Auto-Alt-Text'),
             'err_no_key'      => __('Ange en API-nyckel under Inställningar → Anslutning för att generera alt-text.', 'WP-Auto-Alt-Text'),
             'err_tracked_full' => __('Vänta tills den pågående genereringen är klar, eller använd Hela biblioteket.', 'WP-Auto-Alt-Text'),
+            'err_generic'     => __('Det gick inte att starta genereringen. Försök igen om en stund.', 'WP-Auto-Alt-Text'),
+            'grid_generate'   => __('Generera alt-text för markerade', 'WP-Auto-Alt-Text'),
             'err_empty'       => __('Markera minst en bild.', 'WP-Auto-Alt-Text'),
         ];
     }

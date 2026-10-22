@@ -19,39 +19,41 @@ class Auto_Alt_Text_Overwrite_Policy_Rest_Test extends WP_UnitTestCase {
         $this->assertTrue($data['results'][$id]['skipped']);
         $this->assertSame('Written by an editor', get_post_meta($id, '_wp_attachment_image_alt', true));
     }
-}
 
-class Auto_Alt_Text_Overwrite_Policy_Ajax_Test extends WP_Ajax_UnitTestCase {
     public function test_media_bulk_keeps_human_alt_text_under_default_policy() {
         delete_option(Auto_Alt_Text_Provenance::POLICY_OPTION);
-        $this->_setRole('administrator');
+        Auto_Alt_Text_Activator::activate();
+        global $wpdb;
+        $wpdb->query('DELETE FROM ' . Auto_Alt_Text_Queue::get_table_name());
+        delete_option('aat_library_runner_lock');
+        (new Auto_Alt_Text_OpenAI())->save_api_key('sk-test-not-real');
+        $user = self::factory()->user->create(['role' => 'administrator']);
+        wp_set_current_user($user);
         add_filter('pre_http_request', function ($pre, $args, $url) {
             if (strpos($url, 'openai.com') !== false) {
                 $this->fail('OpenAI must not be called for a skipped image');
+            }
+            if (strpos($url, 'admin-post.php') !== false) {
+                return ['headers' => [], 'body' => '', 'response' => ['code' => 204, 'message' => 'No Content'], 'cookies' => [], 'filename' => null];
             }
             return $pre;
         }, 10, 3);
         $id = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
         update_post_meta($id, '_wp_attachment_image_alt', 'Written by an editor');
-        $_POST = [
-            'nonce' => wp_create_nonce('auto_alt_text_batch_nonce'),
-            'ids'   => wp_json_encode([$id]),
-        ];
 
-        global $wpdb;
-        $suppress = $wpdb->suppress_errors(true);
-        try {
-            $this->_handleAjax('process_image_batch');
-        } catch (WPAjaxDieContinueException $e) {
-            // wp_send_json_* ends the request.
-        } finally {
-            $wpdb->suppress_errors($suppress);
-        }
-        $response = json_decode($this->_last_response, true);
+        $result = Auto_Alt_Text_Bulk::request($user, [$id]);
+        $this->assertSame(1, $result['queued'] + $result['already_queued'], wp_json_encode($result));
+        Auto_Alt_Text_Library_Runner::tick_for_request(5.0);
+        $bulk = Auto_Alt_Text_Bulk::progress($user);
 
-        $this->assertTrue($response['data'][$id]['skipped'], $this->_last_response);
+        $this->assertSame('finished', $bulk['state']);
+        $this->assertSame(1, $bulk['skipped']);
+        $this->assertSame(0, $bulk['written']);
+        $this->assertSame('Written by an editor', get_post_meta($id, '_wp_attachment_image_alt', true));
     }
+}
 
+class Auto_Alt_Text_Overwrite_Policy_Ajax_Test extends WP_Ajax_UnitTestCase {
     public function test_media_folder_batch_keeps_human_alt_text_under_default_policy() {
         delete_option(Auto_Alt_Text_Provenance::POLICY_OPTION);
         $this->_setRole('administrator');

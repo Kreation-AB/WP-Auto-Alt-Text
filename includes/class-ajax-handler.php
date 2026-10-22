@@ -3,18 +3,16 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class Auto_Alt_Text_Ajax_Handler {
     private const NONCE_ACTION = 'auto_alt_text_nonce';
     private const LOG_TYPE = 'debug';
-    private const BATCH_NONCE_ACTION = 'auto_alt_text_batch_nonce';
 
     private const ERROR_MISSING_ID = 'Missing attachment ID';
     private const ERROR_INVALID_ATTACHMENT = 'Invalid attachment ID';
     private const ERROR_INSUFFICIENT_PERMISSIONS = 'Insufficient permissions';
     /**
-     * Registers AJAX actions for generating alt text for attachments and processing image batches.
+     * Registers AJAX actions for generating alt text for attachments.
      */
     public function __construct() {
         add_action('wp_ajax_generate_alt_text_for_attachment', [$this, 'generate_alt_text_for_attachment']);
         add_action('wp_ajax_aat_get_context', [$this, 'get_context']);
-        add_action('wp_ajax_process_image_batch', [$this, 'process_image_batch']);
         add_action('wp_ajax_regenerate_alt_text_with_feedback', [$this, 'regenerate_alt_text_with_feedback']);
     }
 
@@ -71,99 +69,6 @@ class Auto_Alt_Text_Ajax_Handler {
         }
     }
 
-    /**
-     * Processes a batch of image attachments and generates alt text for them using the OpenAI API.
-     *
-     * This function is called via an AJAX request to generate alt text for a batch of image attachments.
-     * It first checks the user's permissions to ensure they have the necessary privileges to upload files.
-     * It then retrieves the IDs of the images to be processed from the request, and for each image, it
-     * generates the alt text using the Auto_Alt_Text_OpenAI class. The generated alt text is then
-     * returned as a JSON response.
-     */
-    public function process_image_batch() {
-        check_ajax_referer(self::BATCH_NONCE_ACTION, 'nonce');
-
-        if (!current_user_can('upload_files')) {
-            wp_send_json_error('Insufficient permissions');
-            return;
-        }
-
-        $ids = json_decode(stripslashes($_POST['ids']));
-        if (!is_array($ids)) {
-            wp_send_json_error('Invalid input');
-            return;
-        }
-
-        $openai = new Auto_Alt_Text_OpenAI();
-        $results = [];
-        $rate_limit_message = null;
-
-        foreach ($ids as $id) {
-            // After a rate limit the rest of the list would fail the same way:
-            // report it as not processed and write nothing for it.
-            if (null !== $rate_limit_message) {
-                $results[$id] = [
-                    'success'       => false,
-                    'not_processed' => true,
-                    'message'       => $rate_limit_message,
-                ];
-                continue;
-            }
-
-            if (!wp_attachment_is_image($id)) {
-                $results[$id] = [
-                    'success' => false,
-                    'message' => self::ERROR_INVALID_ATTACHMENT,
-                ];
-                continue;
-            }
-
-            if (!current_user_can('edit_post', $id)) {
-                $results[$id] = [
-                    'success' => false,
-                    'message' => self::ERROR_INSUFFICIENT_PERMISSIONS,
-                ];
-                continue;
-            }
-
-            if (!Auto_Alt_Text_Provenance::allows_overwrite($id, Auto_Alt_Text_Provenance::default_policy())) {
-                $results[$id] = [
-                    'success' => false,
-                    'skipped' => true,
-                    'message' => __('Skipped: the existing alt text is kept by the overwrite setting.', 'WP-Auto-Alt-Text'),
-                ];
-                continue;
-            }
-
-            $image_url = wp_get_attachment_url($id);
-            if ($image_url) {
-                $alt_text = $openai->generate_alt_text($image_url, $id, 'batch');
-                if ($alt_text) {
-                    $results[$id] = [
-                        'success' => true,
-                        'alt_text' => $alt_text,
-                    ];
-                    continue;
-                }
-            }
-
-            $results[$id] = [
-                'success' => false,
-                'message' => $openai->get_last_error() ?: __('Failed to generate alt text', 'WP-Auto-Alt-Text'),
-            ];
-            if ('rate_limit' === $openai->get_last_error_class()) {
-                $results[$id]['rate_limited'] = true;
-                $rate_limit_message = $results[$id]['message'];
-            }
-        }
-
-        $response = ['success' => true, 'data' => $results];
-        if (null !== $rate_limit_message) {
-            $response['rate_limited'] = true;
-            $response['message']      = $rate_limit_message;
-        }
-        wp_send_json($response);
-    }
     /**
      * Applies the generated alt text to the specified image attachment.
      *

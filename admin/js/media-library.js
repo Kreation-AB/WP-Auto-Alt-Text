@@ -3,6 +3,7 @@
  * PHP prints the notice first (it works without JS); this module polls the
  * REST route and re-renders the same structure. Nothing from the API is
  * inserted as HTML: text goes through textContent and links through href.
+ * In grid mode it also adds the "generate for selected" toolbar button.
  */
 const cfg = window.aatMediaLibrary || {};
 const t = cfg.i18n || {};
@@ -19,6 +20,7 @@ let lastLiveText = '';
 let lastLiveAt = 0;
 let latest = null;
 let failuresKey = '';
+let lastStalled = false;
 
 const $ = (id) => document.getElementById('aat-bulk-' + id);
 const root = () => document.getElementById('aat-bulk-notice');
@@ -46,15 +48,25 @@ function url(path) {
 	return cfg.restUrl + (path || '');
 }
 
-async function api(method, path) {
-	const response = await fetch(url(path), {
+async function api(method, path, body) {
+	const options = {
 		method,
 		credentials: 'same-origin',
 		headers: { 'X-WP-Nonce': cfg.nonce, 'Content-Type': 'application/json' },
-	});
+	};
+	if (body !== undefined) {
+		options.body = JSON.stringify(body);
+	}
+	const response = await fetch(url(path), options);
 	if (!response.ok) {
 		const error = new Error('HTTP ' + response.status);
 		error.status = response.status;
+		try {
+			const data = await response.json();
+			error.serverMessage = data && typeof data.message === 'string' ? data.message : '';
+		} catch (ignore) {
+			error.serverMessage = '';
+		}
 		throw error;
 	}
 	return response.json();
@@ -135,6 +147,7 @@ function buildNotice() {
 	controls.appendChild(document.createTextNode(' '));
 	controls.appendChild(link('aat-bulk-dismiss', t.hide, links.dismiss));
 	notice.appendChild(controls);
+	// Created empty: the text is set on a later tick so the first announcement is not missed.
 	const live = el('p', 'screen-reader-text', 'aat-bulk-live');
 	live.setAttribute('aria-live', 'polite');
 	live.setAttribute('aria-atomic', 'true');
@@ -142,7 +155,7 @@ function buildNotice() {
 	return notice;
 }
 
-function insertNotice(notice) {
+function placeNotice(notice) {
 	const wrap = document.querySelector('.wrap');
 	const anchor = wrap && wrap.querySelector('.wp-header-end');
 	if (anchor) {
@@ -152,6 +165,10 @@ function insertNotice(notice) {
 	} else {
 		document.body.insertBefore(notice, document.body.firstChild);
 	}
+}
+
+function insertNotice(notice) {
+	placeNotice(notice);
 	bind(notice);
 }
 
@@ -182,7 +199,8 @@ function renderFailures(p) {
 
 /** Creates the notice when it is missing, otherwise updates it in place. */
 function renderNotice(p) {
-	if (!root()) {
+	const created = !root();
+	if (created) {
 		insertNotice(buildNotice());
 	}
 	const notice = root();
@@ -228,12 +246,12 @@ function renderNotice(p) {
 	part('.aat-bulk-refresh').hidden = true;
 	part('.aat-bulk-cancel').hidden = finished || Number(p.pending) < 1;
 	setText(part('.aat-bulk-dismiss'), finished ? t.close : t.hide);
-	announceFor(p);
+	announceFor(p, created);
 }
 
 /* ---- Live region ---- */
 
-function announce(text, force) {
+function announce(text, force, defer) {
 	const now = Date.now();
 	if (!text || text === lastLiveText) {
 		return;
@@ -241,16 +259,27 @@ function announce(text, force) {
 	if (!force && now - lastLiveAt < LIVE_MIN_INTERVAL_MS) {
 		return;
 	}
-	setText($('live'), text);
 	lastLiveText = text;
 	lastLiveAt = now;
+	if (defer) {
+		window.setTimeout(() => setText($('live'), text), 100);
+	} else {
+		setText($('live'), text);
+	}
 }
 
-/** State changes are announced at once, progress at most every 30 s. */
-function announceFor(p) {
+/**
+ * State changes (and a new notice) are announced at once, progress at most
+ * every 30 s. When the run turns stalled, the instruction is announced too.
+ */
+function announceFor(p, created) {
 	const changed = lastState !== null && lastState !== p.state;
+	const stalled = p.state === 'running' && Boolean(p.stalled);
+	const turnedStalled = stalled && !lastStalled;
 	lastState = p.state;
-	announce(summaryText(p), changed);
+	lastStalled = stalled;
+	const summary = summaryText(p);
+	announce(turnedStalled ? summary + ' ' + t.stalled : summary, changed || created || turnedStalled, created);
 }
 
 /* ---- Polling ---- */
@@ -281,6 +310,11 @@ function apply(bulk) {
 		if (notice) {
 			notice.remove();
 		}
+		// A notice created later starts clean.
+		failuresKey = '';
+		lastState = null;
+		lastLiveText = '';
+		lastStalled = false;
 		return;
 	}
 	renderNotice(bulk);
@@ -340,11 +374,15 @@ async function control(path, event) {
 	}
 	event.preventDefault();
 	// An in-flight poll or tick must not delay the click: its response is discarded.
-	seq++;
+	const mine = ++seq;
 	window.clearTimeout(timer);
 	const href = event.currentTarget.href;
 	try {
 		const response = await api('POST', path);
+		if (mine !== seq) {
+			// A later click (Avbryt, then Dölj) has taken over: this response is stale.
+			return;
+		}
 		if (path === '/dismiss') {
 			apply(null);
 			focusHeading();
@@ -358,6 +396,8 @@ async function control(path, event) {
 	} catch (error) {
 		if (error.status === 401 || error.status === 403) {
 			expire();
+		} else if (mine !== seq) {
+			// Stale: the later click decides what happens.
 		} else if (href && href !== '#') {
 			// Anything else: the nonce-protected admin-post link does the same job.
 			window.location.href = href;
@@ -378,7 +418,138 @@ function bind(notice) {
 	}
 }
 
+/* ---- Grid bulk button ---- */
+
+const attachedToolbars = new WeakSet();
+
+function gridImageIds(selection) {
+	return selection
+		.filter((model) => model.get('type') === 'image')
+		.map((model) => model.get('id'));
+}
+
+function clearGridError() {
+	const old = document.getElementById('aat-grid-error');
+	if (old) {
+		old.remove();
+	}
+}
+
+function showGridError(message) {
+	clearGridError();
+	const notice = el('div', 'notice notice-error aat-grid-error', 'aat-grid-error');
+	notice.setAttribute('role', 'alert');
+	const paragraph = el('p');
+	paragraph.textContent = message;
+	notice.appendChild(paragraph);
+	placeNotice(notice);
+}
+
+/** Adds the button to the grid's toolbar. Does nothing, and throws nothing, when a piece is missing. */
+function attachGridButton(frame) {
+	const media = window.wp && window.wp.media;
+	const toolbar = frame && frame.browserView && frame.browserView.toolbar;
+	if (!media || !media.view || !media.view.Button || !toolbar || typeof toolbar.set !== 'function' || attachedToolbars.has(toolbar)) {
+		return;
+	}
+	const selection = typeof frame.state === 'function' && frame.state() ? frame.state().get('selection') : null;
+	if (!selection || typeof selection.filter !== 'function') {
+		return;
+	}
+	attachedToolbars.add(toolbar);
+
+	let inFlight = false;
+	let visible = false;
+	// Button.render() rewrites the class list, so the hidden class is applied after it.
+	const GridButton = media.view.Button.extend({
+		render() {
+			media.view.Button.prototype.render.apply(this, arguments);
+			this.el.classList.toggle('hidden', !visible);
+			return this;
+		},
+	});
+	const button = new GridButton({
+		text: t.grid_generate,
+		style: 'primary',
+		size: '',
+		classes: ['aat-grid-generate'],
+		disabled: true,
+		priority: -60,
+		click: generate,
+	});
+
+	function sync() {
+		visible = typeof frame.isModeActive === 'function' && frame.isModeActive('select');
+		button.model.set('disabled', inFlight || gridImageIds(selection).length === 0);
+		button.render();
+	}
+
+	async function generate() {
+		const ids = gridImageIds(selection);
+		if (inFlight || ids.length === 0 || !cfg.restUrl) {
+			return;
+		}
+		const hadFocus = document.activeElement === button.el;
+		inFlight = true;
+		sync();
+		clearGridError();
+		// An in-flight poll must not overwrite the answer to this click.
+		const mine = ++seq;
+		window.clearTimeout(timer);
+		try {
+			const response = await api('POST', '', { attachment_ids: ids });
+			if (mine === seq) {
+				if (response && response.bulk) {
+					apply(response.bulk);
+				} else {
+					showGridError(t.err_generic);
+				}
+			}
+		} catch (error) {
+			if (error.status === 401 || error.status === 403) {
+				expire();
+				showGridError(t.session_expired);
+			} else {
+				showGridError(error.serverMessage || t.err_generic);
+			}
+		} finally {
+			inFlight = false;
+			sync();
+			if (hadFocus && !button.model.get('disabled')) {
+				button.el.focus();
+			}
+			schedule();
+		}
+	}
+
+	toolbar.set('aatGenerate', button);
+	selection.on('add remove reset', sync);
+	if (typeof frame.on === 'function') {
+		frame.on('select:activate select:deactivate', sync);
+	}
+	sync();
+}
+
+function initGrid() {
+	const jq = window.jQuery;
+	if (!cfg.restUrl || typeof jq !== 'function') {
+		return;
+	}
+	jq('#wp-media-grid').on('wp-media-grid-ready', (event, frame) => {
+		try {
+			attachGridButton(frame);
+			if (frame && typeof frame.on === 'function') {
+				// The browser view is rebuilt when the grid leaves edit mode.
+				frame.on('content:render:browse', () => attachGridButton(frame));
+			}
+		} catch (error) {
+			// The grid keeps working without the button.
+		}
+	});
+}
+
 function init() {
+	initGrid();
 	if (!cfg.restUrl) {
 		return;
 	}

@@ -33,7 +33,7 @@ parameters:
 		-
 			message: '#^Unreachable statement \- code above always terminates\.$#'
 			identifier: deadCode.unreachable
-			count: 12
+			count: 10
 			path: includes/class-ajax-handler.php
 
 		-

@@ -276,7 +276,6 @@ class Auto_Alt_Text_Admin {
 
         wp_localize_script(self::SCRIPT_HANDLE, 'autoAltTextData', [
             'ajaxurl' => admin_url('admin-ajax.php'),
-            'nonce' => wp_create_nonce('auto_alt_text_batch_nonce'),
 			'actionNonce' => wp_create_nonce('auto_alt_text_nonce'),
         ]);
     }

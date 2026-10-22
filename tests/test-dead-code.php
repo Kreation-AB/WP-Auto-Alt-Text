@@ -14,4 +14,10 @@ class Auto_Alt_Text_Dead_Code_Test extends WP_UnitTestCase {
         $this->assertFalse(method_exists('Auto_Alt_Text_Image_Process', 'process_image_batch'));
         $this->assertFalse(method_exists('Auto_Alt_Text_Admin', 'handle_batch_processing'));
     }
+
+    /** The browser-driven media bulk loop was replaced by the queue (Auto_Alt_Text_Bulk). */
+    public function test_sync_media_bulk_is_gone() {
+        $this->assertFalse(has_action('wp_ajax_process_image_batch'));
+        $this->assertFalse(method_exists('Auto_Alt_Text_Ajax_Handler', 'process_image_batch'));
+    }
 }
