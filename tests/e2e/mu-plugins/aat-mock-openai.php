@@ -87,4 +87,26 @@ function aat_e2e_mock_bootstrap( bool $enabled ): void {
 	}
 }
 
+/**
+ * With aat_e2e_extra_columns set, adds three fixed-width media list columns, as other plugins do
+ * (FileBird, file size, Imagify), to check that the core file-name column keeps its room.
+ */
+function aat_e2e_extra_columns( array $columns ): array {
+	if ( get_option( 'aat_e2e_extra_columns' ) ) {
+		$columns['aat_extra_a'] = 'Extra A';
+		$columns['aat_extra_b'] = 'Extra B';
+		$columns['aat_extra_c'] = 'Extra C';
+	}
+	return $columns;
+}
+
+function aat_e2e_extra_columns_css(): void {
+	if ( get_option( 'aat_e2e_extra_columns' ) ) {
+		echo '<style>.column-aat_extra_a{width:11%}.column-aat_extra_b{width:16.5%}.column-aat_extra_c{width:150px}.fixed .column-parent{width:15%}</style>';
+	}
+}
+
+add_filter( 'manage_media_columns', 'aat_e2e_extra_columns' );
+add_action( 'admin_head-upload.php', 'aat_e2e_extra_columns_css' );
+
 aat_e2e_mock_bootstrap( defined( 'AAT_E2E_MOCK' ) && AAT_E2E_MOCK );

@@ -152,8 +152,6 @@ class Auto_Alt_Text_Alt_View {
             echo '<span class="aat-alt-col-missing">' . esc_html($info['label']) . '</span>';
             return;
         }
-        $alt = trim((string) get_post_meta($post_id, Auto_Alt_Text_Provenance::ALT_META_KEY, true));
-        echo '<span class="aat-alt-col-text">' . esc_html($alt) . '</span>';
         echo '<span class="aat-alt-col-source aat-alt-col-' . esc_attr($info['state']) . '">' . esc_html($info['label']) . '</span>';
     }
 }

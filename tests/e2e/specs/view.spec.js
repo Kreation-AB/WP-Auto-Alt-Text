@@ -51,6 +51,7 @@ test.describe( 'alt-text view in list mode', () => {
 
 	test.afterAll( async ( { browser } ) => {
 		restoreOption( 'auto_alt_text_auto_generate', savedAutoGenerate );
+		restoreOption( 'aat_e2e_extra_columns', null );
 		const page = await browser.newPage();
 		await page.goto( '/wp-admin/upload.php?mode=grid' );
 		await page.close();
@@ -79,10 +80,25 @@ test.describe( 'alt-text view in list mode', () => {
 		const cell = ( id ) => page.locator( `#post-${ id } td.column-aat_alt` );
 		await expect( cell( ids[ 0 ] ) ).toContainText( 'Saknas' );
 		await expect( cell( ids[ 0 ] ).locator( '.aat-alt-col-missing' ) ).toBeVisible();
-		await expect( cell( ids[ 1 ] ) ).toContainText( AI_TEXT );
+		await expect( cell( ids[ 1 ] ) ).not.toContainText( AI_TEXT );
 		await expect( cell( ids[ 1 ] ) ).toContainText( 'AI-skriven' );
-		await expect( cell( ids[ 2 ] ) ).toContainText( HUMAN_TEXT );
+		await expect( cell( ids[ 2 ] ) ).not.toContainText( HUMAN_TEXT );
 		await expect( cell( ids[ 2 ] ) ).toContainText( 'Skriven av en person' );
+	} );
+
+	test( "the file-name column keeps its room next to other plugins' columns", async ( { page } ) => {
+		wpCli( [ 'option', 'update', 'aat_e2e_extra_columns', '1' ] );
+		await page.setViewportSize( { width: 1990, height: 900 } );
+		await page.goto( '/wp-admin/upload.php?mode=list' );
+		await expect( page.locator( '.wp-list-table thead th.column-aat_extra_a' ) ).toBeVisible();
+		const width = async ( selector ) => ( await page.locator( selector ).boundingBox() ).width;
+		const title = await width( 'th#title' );
+		expect( title ).toBeGreaterThanOrEqual( 150 );
+		// Both are auto-width, so they share the rest equally; allow for sub-pixel rounding.
+		expect( title + 1 ).toBeGreaterThanOrEqual( await width( 'thead th.column-aat_alt' ) );
+
+		await page.setViewportSize( { width: 1280, height: 900 } );
+		expect( await width( 'th#title' ) ).toBeGreaterThanOrEqual( 50 );
 	} );
 
 	test( 'filter, select all and bulk generate', async ( { page } ) => {

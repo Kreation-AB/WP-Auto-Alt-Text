@@ -164,16 +164,22 @@ class Auto_Alt_Text_Alt_View_Test extends WP_UnitTestCase {
         return ob_get_clean();
     }
 
-    public function test_column_shows_escaped_alt_and_provenance_label() {
-        $ai = $this->image('<b>x</b>');
+    public function test_column_shows_only_the_provenance_label_never_the_alt_text() {
+        $secret = '<b>Hemlig text</b>';
+
+        $ai = $this->image($secret);
         Auto_Alt_Text_Provenance::record($ai, 'batch', null, 'x');
         $html = $this->column_html($ai);
-        $this->assertStringContainsString('&lt;b&gt;x&lt;/b&gt;', $html);
-        $this->assertStringNotContainsString('<b>', $html);
         $this->assertStringContainsString('AI-skriven', $html);
+        $this->assertStringContainsString('aat-alt-col-ai', $html);
+        $this->assertStringNotContainsString($secret, $html);
+        $this->assertStringNotContainsString(esc_html($secret), $html);
+        $this->assertStringNotContainsString('Hemlig', $html);
 
-        $human = $this->image('Hund');
-        $this->assertStringContainsString('Skriven av en person', $this->column_html($human));
+        $human = $this->image($secret);
+        $html = $this->column_html($human);
+        $this->assertStringContainsString('Skriven av en person', $html);
+        $this->assertStringNotContainsString('Hemlig', $html);
 
         $missing = $this->column_html($this->image());
         $this->assertStringContainsString('Saknas', $missing);

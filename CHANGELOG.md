@@ -15,7 +15,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - **Extra instruktioner.** Ett fält för egna instruktioner, till exempel "Nämn alltid färgen". De läggs sist i pluginets instruktioner och kan inte ändra svarets format.
 - **Alt-textkontext.** I mediebiblioteket, på bildens redigeringssida och i förhandsgranskningen ser du vilken produkt, sida eller vilket inlägg alt-texten hör till, eller varför inget hittades. `wp auto-alt-text context <id>` visar samma sak i terminalen.
 - **Skilj på AI-text och text skriven av en redaktör.** Pluginet märker de alt-texter det skriver. Ändrar en redaktör texten räknas den som redaktörens egen, var ändringen än görs. En ny inställning, "Skriv över befintliga alt-texter vid massgenerering", bestämmer vad massåtgärder, REST och WP-CLI får skriva över: bara saknade alt-texter (standard), även oredigerade AI-texter, eller allt. Befintliga AI-texter från tidigare versioner märks automatiskt i bakgrunden efter uppdateringen.
-- **Filtret "Saknar alt-text" och kolumnen "Alt-text".** Mediebiblioteket (lista och rutnät) kan filtreras på bilder utan alt-text. I listläget visar en ny kolumn texten och vem som skrev den: "AI-skriven" eller "Skriven av en person". Statistikremsan på inställningssidan och "Hela biblioteket" länkar till den filtrerade listan.
+- **Filtret "Saknar alt-text" och kolumnen "Alt-text".** Mediebiblioteket (lista och rutnät) kan filtreras på bilder utan alt-text. I listläget visar en ny kolumn vem som skrev alt-texten: "AI-skriven", "Skriven av en person" eller "Saknas". Själva texten ser du i bildens detaljvy, som vanligt. Statistikremsan på inställningssidan och "Hela biblioteket" länkar till den filtrerade listan.
 
 #### Modell och kostnad
 
