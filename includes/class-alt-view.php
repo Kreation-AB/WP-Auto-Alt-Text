@@ -12,6 +12,7 @@ class Auto_Alt_Text_Alt_View {
 
     public static function register(): void {
         add_action('restrict_manage_posts', [self::class, 'render_filter'], 10, 1);
+        add_filter('ajax_query_attachments_args', [self::class, 'filter_grid_query']);
         add_action('pre_get_posts', [self::class, 'filter_list_query']);
         add_filter('manage_media_columns', [self::class, 'add_column']);
         add_action('manage_media_custom_column', [self::class, 'render_column'], 10, 2);
@@ -66,14 +67,36 @@ class Auto_Alt_Text_Alt_View {
         }
     }
 
-    public static function render_filter(string $post_type, string $which = 'top'): void {
-        if ('attachment' !== $post_type || 'top' !== $which || !self::on_media_screen()) {
+    /** URL of the list-mode view of images without alt text. */
+    public static function list_url(): string {
+        return admin_url('upload.php?mode=list&' . self::PARAM . '=' . self::MISSING);
+    }
+
+    /**
+     * Grid mode: core whitelists the query keys before this filter runs, so the
+     * custom param is read from the raw request. Only "missing" is accepted.
+     *
+     * @param array<string, mixed> $query
+     * @return array<string, mixed>
+     */
+    public static function filter_grid_query(array $query): array {
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput -- read-only filter; the value is compared to a constant, core's handler checks capabilities.
+        $request = isset($_REQUEST['query']) && is_array($_REQUEST['query']) ? wp_unslash($_REQUEST['query']) : [];
+        $raw = $request[self::PARAM] ?? '';
+        if (!is_string($raw) || self::MISSING !== $raw) {
+            return $query;
+        }
+        return self::missing_clauses($query);
+    }
+
+    public static function render_filter(string $post_type): void {
+        if ('attachment' !== $post_type || !self::on_media_screen()) {
             return;
         }
         $selected = self::requested();
         echo '<label class="screen-reader-text" for="aat-alt-filter">' . esc_html__('Filtrera på alt-text', 'WP-Auto-Alt-Text') . '</label>';
         echo '<select name="' . esc_attr(self::PARAM) . '" id="aat-alt-filter">';
-        echo '<option value="">' . esc_html__('Alla bilder och filer', 'WP-Auto-Alt-Text') . '</option>';
+        echo '<option value="">' . esc_html__('Alla alt-texter', 'WP-Auto-Alt-Text') . '</option>';
         echo '<option value="' . esc_attr(self::MISSING) . '"' . selected($selected, true, false) . '>' . esc_html__('Saknar alt-text', 'WP-Auto-Alt-Text') . '</option>';
         echo '</select>';
     }

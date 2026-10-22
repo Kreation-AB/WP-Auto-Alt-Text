@@ -105,6 +105,44 @@ class Auto_Alt_Text_Alt_View_Test extends WP_UnitTestCase {
         $this->assertSame('', ob_get_clean());
     }
 
+    public function test_filter_dropdown_default_option_and_single_print_through_the_real_hook() {
+        set_current_screen('upload');
+        add_action('restrict_manage_posts', [Auto_Alt_Text_Alt_View::class, 'render_filter'], 10, 1);
+        ob_start();
+        // WP_Media_List_Table fires the hook once with ($post_type, 'bar').
+        do_action('restrict_manage_posts', 'attachment', 'bar');
+        $html = ob_get_clean();
+        remove_action('restrict_manage_posts', [Auto_Alt_Text_Alt_View::class, 'render_filter'], 10);
+        $this->assertSame(1, substr_count($html, 'id="aat-alt-filter"'));
+        $this->assertStringContainsString('>Alla alt-texter</option>', $html);
+    }
+
+    public function test_grid_query_applies_missing_clauses_from_the_raw_request() {
+        $_REQUEST['query'] = ['aat_alt' => 'missing', 'post_mime_type' => 'image/png'];
+        $out = Auto_Alt_Text_Alt_View::filter_grid_query(['post_type' => 'attachment']);
+        unset($_REQUEST['query']);
+        $this->assertSame('OR', $out['meta_query'][0]['relation']);
+        $this->assertSame('image', $out['post_mime_type']);
+
+        $_REQUEST['query'] = ['aat_alt' => \wp_slash('missing')];
+        $out = Auto_Alt_Text_Alt_View::filter_grid_query([]);
+        unset($_REQUEST['query']);
+        $this->assertArrayHasKey('meta_query', $out);
+    }
+
+    public function test_grid_query_ignores_unknown_values() {
+        foreach (['', 'all', 'MISSING ', ['missing']] as $value) {
+            $_REQUEST['query'] = ['aat_alt' => $value];
+            $in = ['post_type' => 'attachment'];
+            $this->assertSame($in, Auto_Alt_Text_Alt_View::filter_grid_query($in));
+        }
+        unset($_REQUEST['query']);
+        $this->assertSame(['a' => 1], Auto_Alt_Text_Alt_View::filter_grid_query(['a' => 1]));
+        $_REQUEST['query'] = 'missing';
+        $this->assertSame(['a' => 1], Auto_Alt_Text_Alt_View::filter_grid_query(['a' => 1]));
+        unset($_REQUEST['query']);
+    }
+
     private function column_html($id) {
         ob_start();
         Auto_Alt_Text_Alt_View::render_column('aat_alt', $id);

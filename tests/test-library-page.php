@@ -120,6 +120,24 @@ class Auto_Alt_Text_Library_Page_Test extends WP_UnitTestCase {
         $this->assertSame(0, $posts_selects, 'The card must not run SELECTs over the posts table');
     }
 
+    public function test_status_card_links_to_the_filtered_list_when_missing_is_positive() {
+        $html = $this->output([Auto_Alt_Text_Library_Page::class, 'render_status_card']);
+        $this->assertStringContainsString('Bilder som saknar alt-text: 10', $html);
+        $this->assertMatchesRegularExpression('#<a [^>]*href="[^"]*upload\.php\?mode=list&(?:\#038;|amp;)?aat_alt=missing"[^>]*>Visa dem i mediebiblioteket</a>#', $html);
+        $page = $this->output([Auto_Alt_Text_Library_Page::class, 'render']);
+        $this->assertStringContainsString('Visa dem i mediebiblioteket', $page);
+    }
+
+    public function test_no_link_when_missing_is_zero() {
+        update_option('aat_library_counts', array_merge((array) get_option('aat_library_counts'), ['missing' => 0]));
+        $this->assertSame(0, Auto_Alt_Text_Library_Scanner::cached_counts()['missing']);
+        $html = $this->output([Auto_Alt_Text_Library_Page::class, 'render_status_card']);
+        $this->assertStringContainsString('Bilder som saknar alt-text: 0', $html);
+        $this->assertStringNotContainsString('Visa dem i mediebiblioteket', $html);
+        $page = $this->output([Auto_Alt_Text_Library_Page::class, 'render']);
+        $this->assertStringNotContainsString('Visa dem i mediebiblioteket', $page);
+    }
+
     public function test_status_card_schedules_the_first_count_when_there_is_none() {
         delete_option('aat_library_counts');
         wp_unschedule_hook(Auto_Alt_Text_Library_Scanner::RECOUNT_HOOK);

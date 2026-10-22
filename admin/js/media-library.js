@@ -548,7 +548,51 @@ function initGrid() {
 	});
 }
 
+/**
+ * Adds "Saknar alt-text" to the grid's type dropdown. Core picks the selected
+ * option as the first filter whose props all match the collection, so every
+ * core filter gets the custom prop set to null. Only the grid on upload.php is
+ * touched: editor media modals have no grid mode. Extends AttachmentFilters.All
+ * only (other plugins' subclasses are left alone).
+ */
+function extendGridFilter() {
+	const gf = cfg.gridFilter;
+	const all = window.wp && window.wp.media && window.wp.media.view && window.wp.media.view.AttachmentFilters
+		? window.wp.media.view.AttachmentFilters.All
+		: null;
+	if (!gf || !gf.param || !all || !all.prototype || typeof all.prototype.createFilters !== 'function') {
+		return;
+	}
+	if (!document.body || !document.body.classList.contains('upload-php')) {
+		return;
+	}
+	const original = all.prototype.createFilters;
+	all.prototype.createFilters = function createFilters(...args) {
+		const result = original.apply(this, args);
+		try {
+			const controller = this.controller;
+			if (this.filters && controller && typeof controller.isModeActive === 'function' && controller.isModeActive('grid')) {
+				Object.keys(this.filters).forEach((key) => {
+					const filter = this.filters[key];
+					if (filter && filter.props) {
+						filter.props[gf.param] = null;
+					}
+				});
+				this.filters.aat_missing = {
+					text: gf.label,
+					props: { [gf.param]: gf.value },
+					priority: 60,
+				};
+			}
+		} catch (error) {
+			// The dropdown keeps core's options.
+		}
+		return result;
+	};
+}
+
 function init() {
+	extendGridFilter();
 	initGrid();
 	if (!cfg.restUrl) {
 		return;

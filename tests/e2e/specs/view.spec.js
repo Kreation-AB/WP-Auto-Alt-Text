@@ -105,4 +105,47 @@ test.describe( 'alt-text view in list mode', () => {
 		expect( await altOf( ids[ 2 ] ) ).toBe( HUMAN_TEXT );
 		await page.locator( '.aat-bulk-dismiss' ).click();
 	} );
+
+	test( 'grid filter narrows the grid', async ( { page } ) => {
+		await page.goto( '/wp-admin/upload.php?mode=grid' );
+		const item = ( id ) => page.locator( `.attachment[data-id="${ id }"]` );
+		for ( const id of ids ) {
+			await expect( item( id ) ).toBeVisible();
+		}
+		const type = page.locator( '#media-attachment-filters' );
+		await expect( type.locator( 'option' ).last() ).toHaveText( 'Saknar alt-text' );
+		await type.selectOption( { label: 'Saknar alt-text' } );
+		await expect( item( ids[ 0 ] ) ).toBeVisible();
+		await expect( item( ids[ 1 ] ) ).toHaveCount( 0 );
+		await expect( item( ids[ 2 ] ) ).toHaveCount( 0 );
+	} );
+
+	test( 'grid filter combines with the date filter and resets', async ( { page } ) => {
+		await page.goto( '/wp-admin/upload.php?mode=grid' );
+		const item = ( id ) => page.locator( `.attachment[data-id="${ id }"]` );
+		await expect( item( ids[ 2 ] ) ).toBeVisible();
+		const date = page.locator( '#media-attachment-date-filters' );
+		const month = await date.locator( 'option:not([value="all"])' ).first().getAttribute( 'value' );
+		await date.selectOption( month );
+		await page.locator( '#media-attachment-filters' ).selectOption( { label: 'Saknar alt-text' } );
+		await expect( item( ids[ 0 ] ) ).toBeVisible();
+		await expect( item( ids[ 1 ] ) ).toHaveCount( 0 );
+
+		const request = page.waitForRequest( ( r ) => r.url().includes( 'admin-ajax.php' ) && ( r.postData() || '' ).includes( 'query-attachments' ) );
+		await page.locator( '#media-attachment-filters' ).selectOption( 'all' );
+		const body = decodeURIComponent( ( await request ).postData() || '' );
+		expect( body ).not.toContain( 'aat_alt' );
+		for ( const id of ids ) {
+			await expect( item( id ) ).toBeVisible();
+		}
+	} );
+
+	test( 'settings strip link opens the filtered list', async ( { page } ) => {
+		wpCli( [ 'eval', 'Auto_Alt_Text_Library_Scanner::run_recount();' ] );
+		await page.goto( '/wp-admin/admin.php?page=auto-alt-text-library' );
+		await page.getByRole( 'link', { name: 'Visa dem i mediebiblioteket' } ).click();
+		await expect( page ).toHaveURL( /upload\.php\?mode=list&aat_alt=missing/ );
+		await expect( page.locator( `#post-${ ids[ 0 ] }` ) ).toBeVisible();
+		await expect( page.locator( `#post-${ ids[ 1 ] }` ) ).toHaveCount( 0 );
+	} );
 } );

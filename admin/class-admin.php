@@ -156,6 +156,11 @@ class Auto_Alt_Text_Admin {
             'pollSeconds' => 5,
             'i18n'        => Auto_Alt_Text_Bulk_Notice::strings(),
             'links'       => Auto_Alt_Text_Bulk_Notice::links(),
+            'gridFilter'  => [
+                'param' => Auto_Alt_Text_Alt_View::PARAM,
+                'value' => Auto_Alt_Text_Alt_View::MISSING,
+                'label' => __('Saknar alt-text', 'WP-Auto-Alt-Text'),
+            ],
         ];
         wp_add_inline_script(self::MEDIA_LIBRARY_HANDLE, 'var aatMediaLibrary = ' . wp_json_encode($config) . ';', 'before');
     }

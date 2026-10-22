@@ -201,6 +201,7 @@ class Auto_Alt_Text_Library_Page {
                 'card_finished' => __('Senaste körningen är klar: %1$s fyllda, %2$s misslyckade.', 'WP-Auto-Alt-Text'),
                 // translators: %1$s is the number of filled images, %2$s the number of failed ones.
                 'card_cancelled' => __('Senaste körningen avbröts: %1$s fyllda, %2$s misslyckade.', 'WP-Auto-Alt-Text'),
+                'view_link' => __('Visa dem i mediebiblioteket', 'WP-Auto-Alt-Text'),
                 'card_link' => __('Öppna Hela biblioteket', 'WP-Auto-Alt-Text'),
             ];
         }
@@ -226,6 +227,7 @@ class Auto_Alt_Text_Library_Page {
         $s = self::strings();
         $run = Auto_Alt_Text_Library_Run::active() ?? Auto_Alt_Text_Library_Run::latest();
         $lines = [];
+        $show_link = false;
         if (null !== $run && self::is_active_run($run)) {
             $progress = Auto_Alt_Text_Library_Run::progress($run);
             $state = Auto_Alt_Text_Library_Run::display_state($run);
@@ -244,6 +246,7 @@ class Auto_Alt_Text_Library_Page {
             }
             // With nothing running the cached count shows, also under the last run's outcome.
             $lines[] = self::card_count_text();
+            $show_link = self::cached_missing() > 0;
         }
         ?>
         <section class="aat-lib-card" aria-labelledby="aat-library-card-title">
@@ -251,9 +254,18 @@ class Auto_Alt_Text_Library_Page {
             <?php foreach ($lines as $line) : ?>
                 <p><?php echo esc_html($line); ?></p>
             <?php endforeach; ?>
+            <?php if ($show_link) : ?>
+                <p><a href="<?php echo esc_url(Auto_Alt_Text_Alt_View::list_url()); ?>"><?php echo esc_html($s['view_link']); ?></a></p>
+            <?php endif; ?>
             <p><a class="button" href="<?php echo esc_url(self::page_url()); ?>"><?php echo esc_html($s['card_link']); ?></a></p>
         </section>
         <?php
+    }
+
+    /** The cached count of images without alt text; zero until a count has completed. */
+    private static function cached_missing(): int {
+        $counts = Auto_Alt_Text_Library_Scanner::cached_counts();
+        return $counts['complete'] ? (int) $counts['missing'] : 0;
     }
 
     /** The card's cached count line. Schedules the first count when there is none; never counts here. */
@@ -414,6 +426,9 @@ class Auto_Alt_Text_Library_Page {
                     <div><dt><?php echo esc_html($s['count_human']); ?></dt><dd data-count="human"><?php echo esc_html(self::fmt_int($counts['human'])); ?></dd></div>
                     <div><dt><?php echo esc_html($s['count_unsupported']); ?></dt><dd data-count="unsupported"><?php echo esc_html(self::fmt_int($counts['unsupported'])); ?></dd></div>
                 </dl>
+                <?php if ($counts['complete'] && (int) $counts['missing'] > 0) : ?>
+                    <p id="aat-library-view-link"><a href="<?php echo esc_url(Auto_Alt_Text_Alt_View::list_url()); ?>"><?php echo esc_html($s['view_link']); ?></a></p>
+                <?php endif; ?>
                 <p id="aat-library-count-status" class="aat-lib-note"><?php echo esc_html($count_status); ?></p>
                 <p>
                     <input type="checkbox" id="aat-library-coverage" aria-describedby="aat-library-coverage-help">
