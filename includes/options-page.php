@@ -177,23 +177,23 @@ function auto_alt_text_render_status_page() {
             <tr>
                 <th scope="row"><?php esc_html_e('Supported Formats', 'WP-Auto-Alt-Text'); ?></th>
                 <td>
-                    <ul class="format-status">
+                    <ul class="aat-format-status">
                         <li>
-                            <span class="format-name">JPEG/JPG</span>
-                            <span class="status-badge supported">✓ Fully Supported</span>
+                            <span class="aat-format-name">JPEG/JPG</span>
+                            <span class="aat-status-badge supported">✓ Fully Supported</span>
                         </li>
                         <li>
-                            <span class="format-name">PNG</span>
-                            <span class="status-badge supported">✓ Fully Supported</span>
+                            <span class="aat-format-name">PNG</span>
+                            <span class="aat-status-badge supported">✓ Fully Supported</span>
                         </li>
                         <li>
-                            <span class="format-name">WebP</span>
-                            <span class="status-badge supported">✓ Fully Supported</span>
+                            <span class="aat-format-name">WebP</span>
+                            <span class="aat-status-badge supported">✓ Fully Supported</span>
                         </li>
                         <li>
-                            <span class="format-name">AVIF</span>
+                            <span class="aat-format-name">AVIF</span>
                             <div>
-                            <span class="status-badge partial">⚠ Auto-converts to JPEG for processing</span>
+                            <span class="aat-status-badge partial">⚠ Auto-converts to JPEG for processing</span>
                             </div>
                         </li>
                     </ul>
@@ -209,22 +209,22 @@ function auto_alt_text_render_status_page() {
         <table class="form-table">
             <tr>
                 <td>
-                    <ul class="format-status">
+                    <ul class="aat-format-status">
                         <li>
-                            <span class="format-name">Server Support</span>
-                            <span class="status-badge <?php echo esc_attr( $avif_status['server_support'] ? 'supported' : 'not-supported' ); ?>">
+                            <span class="aat-format-name">Server Support</span>
+                            <span class="aat-status-badge <?php echo esc_attr( $avif_status['server_support'] ? 'supported' : 'not-supported' ); ?>">
                                 <?php echo esc_html( $avif_status['server_support'] ? '✓ Available' : '⚠ Not Available' ); ?>
                             </span>
                         </li>
                         <li>
-                            <span class="format-name">GD Library</span>
-                            <span class="status-badge <?php echo esc_attr( $avif_status['gd_support'] ? 'supported' : 'not-supported' ); ?>">
+                            <span class="aat-format-name">GD Library</span>
+                            <span class="aat-status-badge <?php echo esc_attr( $avif_status['gd_support'] ? 'supported' : 'not-supported' ); ?>">
                                 <?php echo esc_html( $avif_status['gd_support'] ? '✓ Supported' : '⚠ Not Supported' ); ?>
                             </span>
                         </li>
                         <li>
-                            <span class="format-name">WordPress</span>
-                            <span class="status-badge <?php echo esc_attr( $avif_status['wordpress_support'] ? 'supported' : 'not-supported' ); ?>">
+                            <span class="aat-format-name">WordPress</span>
+                            <span class="aat-status-badge <?php echo esc_attr( $avif_status['wordpress_support'] ? 'supported' : 'not-supported' ); ?>">
                                 <?php echo esc_html( $avif_status['wordpress_support'] ? '✓ Compatible' : '⚠ Not Compatible' ); ?>
                             </span>
                         </li>

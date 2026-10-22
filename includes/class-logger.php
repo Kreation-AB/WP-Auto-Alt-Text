@@ -147,9 +147,9 @@ class Auto_Alt_Text_Logger {
                 </thead>
                 <tbody>
                     <?php foreach ($logs as $log): ?>
-                        <tr class="log-level-<?php echo esc_attr($log->level); ?>">
+                        <tr class="aat-log-level-<?php echo esc_attr($log->level); ?>">
                             <td><?php echo esc_html($log->timestamp); ?></td>
-                            <td><span class="log-level log-level-<?php echo esc_attr($log->level); ?>">
+                            <td><span class="aat-log-level aat-log-level-<?php echo esc_attr($log->level); ?>">
                                 <?php echo esc_html(ucfirst($log->level)); ?>
                             </span></td>
                             <td><?php echo esc_html($log->message); ?></td>

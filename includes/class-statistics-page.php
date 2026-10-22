@@ -70,7 +70,7 @@ class Auto_Alt_Text_Statistics_Page {
             <?php $this->render_queue_panel(); ?>
 
             <?php if ($orphaned_count > 0): ?>
-                <div class="notice notice-warning orphaned-alt-text-stats">
+                <div class="notice notice-warning aat-orphaned-stats">
                     <p><?php
                         /* translators: %s: number of orphaned records found. */
                         printf( esc_html__( 'Hittade %s föräldralösa poster från raderade bilder.', 'WP-Auto-Alt-Text' ), esc_html( $orphaned_count ) );
@@ -93,7 +93,7 @@ class Auto_Alt_Text_Statistics_Page {
                 </div>
                 <div class="stat-box">
                     <h3>Generationstyper</h3>
-                    <ul class="generation-types">
+                    <ul class="aat-generation-types">
                         <li>Manuella uppdateringar: <?php echo esc_html($stats['types']['manual'] ?? 0); ?></li>
                         <li>Bilduppladdningar: <?php echo esc_html($stats['types']['upload'] ?? 0); ?></li>
                         <li>Batchbearbetning: <?php echo esc_html($stats['types']['batch'] ?? 0); ?></li>
@@ -125,21 +125,21 @@ class Auto_Alt_Text_Statistics_Page {
 								echo esc_html($generation->generated_text);
 								if ($generation->is_edited) {
 									$diff = $this->text_diff($generation->generated_text, $generation->edited_text);
-									echo '<div class="edited-text">';
-									echo '<span class="diff-label">Changes:</span>';
-                                    echo '<div class="diff-view">' . wp_kses_post( $diff ) . '</div>';
+									echo '<div class="aat-edited-text">';
+									echo '<span class="aat-diff-label">Changes:</span>';
+                                    echo '<div class="aat-diff-view">' . wp_kses_post( $diff ) . '</div>';
 									echo '</div>';
 								}
 								?>
 							</td>
-							<td><span class="generation-type <?php echo esc_attr($generation->generation_type); ?>"><?php echo esc_html($generation->generation_type); ?></span></td>
+							<td><span class="aat-generation-type <?php echo esc_attr($generation->generation_type); ?>"><?php echo esc_html($generation->generation_type); ?></span></td>
                             <td><?php echo esc_html($update_number); ?></td>
 							<td>
 								<?php if ($generation->is_applied): ?>
-									<span class="status-badge applied">Applied</span>
+									<span class="aat-status-badge applied">Applied</span>
 								<?php endif; ?>
 								<?php if ($generation->is_edited): ?>
-									<span class="status-badge edited">Edited</span>
+									<span class="aat-status-badge edited">Edited</span>
 								<?php endif; ?>
 							</td>
 							<td><?php
