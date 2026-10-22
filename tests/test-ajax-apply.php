@@ -199,12 +199,28 @@ class Auto_Alt_Text_Ajax_Apply_Test extends WP_Ajax_UnitTestCase {
 
         $this->assertFalse($response['success'], $this->_last_response);
         $this->assertSame('aat_alt_changed', $response['data']['code']);
-        $this->assertSame('Alt-texten har ändrats under tiden. Inget sparades.', $response['data']['message']);
+        $this->assertSame('Alt-texten har ändrats under tiden. Inget sparades. Ladda om sidan för att se den nya texten.', $response['data']['message']);
         $this->assertSame('Skriven av redaktören', get_post_meta($id, '_wp_attachment_image_alt', true));
         $this->assertSame('', get_post_meta($id, Auto_Alt_Text_Provenance::META_KEY, true), 'No provenance may be recorded');
         $this->assertSame('human', Auto_Alt_Text_Provenance::classify($id));
         $this->assertSame($stats_before, $this->stats_row($stats_id));
         $this->assertSame('0', $stats_before['is_applied']);
+    }
+
+    public function test_apply_over_the_plugins_own_text_written_meanwhile_saves() {
+        $this->_setRole('administrator');
+        $id = self::factory()->attachment->create_upload_object(DIR_TESTDATA . '/images/canola.jpg');
+        // The upload queue filled the alt after the modal rendered the field empty.
+        update_post_meta($id, '_wp_attachment_image_alt', 'Text from the upload queue');
+        Auto_Alt_Text_Provenance::record($id, 'upload');
+        $this->assertSame('ai', Auto_Alt_Text_Provenance::classify($id));
+
+        $response = $this->apply_slashed($this->apply_post($id, 'A red barn', ''));
+
+        $this->assertTrue($response['success'], $this->_last_response);
+        $this->assertSame('A red barn', get_post_meta($id, '_wp_attachment_image_alt', true));
+        $this->assertSame('ai', Auto_Alt_Text_Provenance::classify($id));
+        $this->assertSame('manual', get_post_meta($id, Auto_Alt_Text_Provenance::META_KEY, true)['source']);
     }
 
     public function test_apply_without_expected_alt_behaves_as_before() {

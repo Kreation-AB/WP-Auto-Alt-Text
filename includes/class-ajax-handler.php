@@ -104,10 +104,14 @@ class Auto_Alt_Text_Ajax_Handler {
                 throw new Exception('Permission denied');
             }
 
-            // Someone saved another text meanwhile (typically the editor, after
+            // A person saved another text meanwhile (typically the editor, after
             // closing the preview): text a person wrote is never overwritten.
-            if (null !== $expected_alt && $expected_alt !== self::stored_alt($attachment_id)) {
-                throw new Exception(__('Alt-texten har ändrats under tiden. Inget sparades.', 'WP-Auto-Alt-Text'), self::ALT_CHANGED);
+            // The plugin's own unedited text (the upload queue or a library run
+            // filled the alt after the field was rendered) may be replaced.
+            if (null !== $expected_alt
+                && $expected_alt !== self::stored_alt($attachment_id)
+                && Auto_Alt_Text_Provenance::STATE_AI !== Auto_Alt_Text_Provenance::classify($attachment_id)) {
+                throw new Exception(__('Alt-texten har ändrats under tiden. Inget sparades. Ladda om sidan för att se den nya texten.', 'WP-Auto-Alt-Text'), self::ALT_CHANGED);
             }
 
             // Metadata functions unslash their input, so slash it once here.

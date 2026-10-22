@@ -345,6 +345,9 @@ test.describe( 'media modal', () => {
 		return field;
 	}
 
+	/** The unapplied AI text in the session cache; Apply's success handler drops it first. */
+	const cachedText = ( page, id ) => page.evaluate( ( key ) => window.sessionStorage.getItem( key ), 'aat_alt_' + id );
+
 	test( 'a late apply after Escape does not overwrite typed alt text (response delayed)', async ( { page } ) => {
 		const media = await openDetails( page );
 		const aiSaves = watchAltSaves( page, RESP_TEXT );
@@ -354,16 +357,50 @@ test.describe( 'media modal', () => {
 		// The server writes the AI text first, then the person's save lands.
 		const { served, release } = await holdResponse( page, 'apply_alt_text' );
 		const field = await applyEscapeAndType( page, media.id, served );
+		expect( await cachedText( page, media.id ) ).toBe( RESP_TEXT );
 
 		const answered = page.waitForResponse( ( response ) => isAjax( response.request(), 'apply_alt_text' ) );
 		release();
 		expect( ( await ( await answered ).json() ).success ).toBe( true );
 
-		// Give a change-triggered save time to happen, then read the server again.
-		await page.waitForTimeout( 1500 );
+		// The success handler has run once the cache is gone; a field write, its
+		// change-triggered save and the announcement happen in the same task.
+		await expect.poll( () => cachedText( page, media.id ) ).toBeNull();
 		await expect( field ).toHaveValue( TYPED_TEXT );
-		expect( await altOf( media.id ) ).toBe( TYPED_TEXT );
+		// "Sparad" would mislead: the person's own text is what the field shows.
+		await expect( page.locator( '.aat-generate-status[role="status"]' ) ).toHaveText( '' );
 		expect( aiSaves ).toEqual( [] );
+		expect( await altOf( media.id ) ).toBe( TYPED_TEXT );
+	} );
+
+	test( 'a late apply does not overwrite a text saved from another frame of the same image', async ( { page } ) => {
+		const media = await openDetails( page );
+		const aiSaves = watchAltSaves( page, RESP_TEXT );
+		await page.locator( '.aat-generate' ).click();
+		await expect( page.locator( '#aat-preview-text' ) ).toHaveValue( RESP_TEXT );
+
+		const { served, release } = await holdResponse( page, 'apply_alt_text' );
+		const dialog = page.locator( 'dialog.aat-preview-dialog' );
+		await dialog.locator( '.aat-preview-apply' ).click();
+		await served;
+		await page.keyboard.press( 'Escape' );
+		await expect( dialog ).toHaveCount( 0 );
+		// Another media frame (a closed modal is only hidden) saves a person's text
+		// through the shared model; this frame's field still shows the old text.
+		const saved = page.waitForResponse( ( response ) => isCoreSave( response.request() ) );
+		await page.evaluate( ( [ id, text ] ) => window.wp.media.attachment( id ).save( 'alt', text ), [ media.id, TYPED_TEXT ] );
+		await saved;
+		expect( await altOf( media.id ) ).toBe( TYPED_TEXT );
+		const field = page.locator( '#attachment-details-two-column-alt-text' );
+		await expect( field ).toHaveValue( '' );
+
+		const answered = page.waitForResponse( ( response ) => isAjax( response.request(), 'apply_alt_text' ) );
+		release();
+		expect( ( await ( await answered ).json() ).success ).toBe( true );
+		await expect.poll( () => cachedText( page, media.id ) ).toBeNull();
+		await expect( field ).toHaveValue( '' );
+		expect( aiSaves ).toEqual( [] );
+		expect( await altOf( media.id ) ).toBe( TYPED_TEXT );
 	} );
 
 	test( 'a late apply after Escape does not overwrite typed alt text (request delayed)', async ( { page } ) => {
@@ -378,16 +415,15 @@ test.describe( 'media modal', () => {
 
 		const answered = page.waitForResponse( ( response ) => isAjax( response.request(), 'apply_alt_text' ) );
 		release();
-		// The server refused: the alt text was no longer what the modal read at Apply.
+		// The server refused: the person's text was no longer what the modal read at Apply.
 		expect( ( await ( await answered ).json() ).data.code ).toBe( 'aat_alt_changed' );
-		await expect( page.locator( '.aat-generate-error[role="alert"]' ) ).toHaveText( 'Alt-texten har ändrats under tiden. Inget sparades.' );
-
-		await page.waitForTimeout( 1500 );
+		// The error handler has run once the message shows.
+		await expect( page.locator( '.aat-generate-error[role="alert"]' ) ).toHaveText( 'Alt-texten har ändrats under tiden. Inget sparades. Ladda om sidan för att se den nya texten.' );
 		await expect( field ).toHaveValue( TYPED_TEXT );
-		expect( await altOf( media.id ) ).toBe( TYPED_TEXT );
 		expect( aiSaves ).toEqual( [] );
+		expect( await altOf( media.id ) ).toBe( TYPED_TEXT );
 		// The AI text stays in the session cache as an unapplied text.
-		expect( await page.evaluate( ( id ) => window.sessionStorage.getItem( 'aat_alt_' + id ), media.id ) ).toBe( RESP_TEXT );
+		expect( await cachedText( page, media.id ) ).toBe( RESP_TEXT );
 	} );
 
 	test( 'an apply refused because the alt text changed elsewhere shows why in the dialog', async ( { page } ) => {
@@ -400,7 +436,7 @@ test.describe( 'media modal', () => {
 
 		const apply = dialog.locator( '.aat-preview-apply' );
 		await apply.click();
-		await expect( dialog.locator( '.aat-preview-error[role="alert"]' ) ).toHaveText( 'Alt-texten har ändrats under tiden. Inget sparades.' );
+		await expect( dialog.locator( '.aat-preview-error[role="alert"]' ) ).toHaveText( 'Alt-texten har ändrats under tiden. Inget sparades. Ladda om sidan för att se den nya texten.' );
 		await expect( dialog ).toHaveCount( 1 );
 		await expect( apply ).not.toHaveAttribute( 'aria-disabled', 'true' );
 		await expect( apply ).toBeFocused();

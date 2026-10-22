@@ -512,17 +512,20 @@ function mediaModel( attachmentId ) {
 }
 
 /**
- * Whether the attachment's alt text still reads `before`: its field on
- * screen or, off screen, its wp.media model (core saved a person's text
- * into it). Anything else means a person changed it after "Använd".
+ * Whether the attachment's alt text still reads `before`: in its wp.media
+ * model, which every media frame showing the attachment shares and core
+ * saves a person's text into (a closed media modal is only hidden), and in
+ * the alt fields of its own block on screen. Anything else means a person
+ * changed it after "Använd". A model never fetched has no alt and is skipped.
  */
 function altUnchanged( state, before ) {
-	const scope = fieldScope( state );
-	if ( scope ) {
-		return Array.prototype.every.call( scope.querySelectorAll( ALT_FIELDS ), ( field ) => field.value === before );
-	}
 	const model = mediaModel( state.attachmentId );
-	return ! model || typeof model.get !== 'function' || model.get( 'alt' ) === before;
+	const alt = model && typeof model.get === 'function' ? model.get( 'alt' ) : undefined;
+	if ( typeof alt === 'string' && alt !== before ) {
+		return false;
+	}
+	const scope = fieldScope( state );
+	return ! scope || Array.prototype.every.call( scope.querySelectorAll( ALT_FIELDS ), ( field ) => field.value === before );
 }
 
 /**
@@ -582,13 +585,17 @@ async function apply( state, origin ) {
 		const data = await post( params );
 		// The applied text is no longer an unapplied AI suggestion.
 		cacheDrop( state.attachmentId );
-		// Open or closed dialog alike: a person's text in the field wins.
-		if ( null === before || altUnchanged( state, before ) ) {
+		// Open or closed dialog alike: a person's text in the field wins, and
+		// then nothing is announced: "sparad" next to their text would mislead.
+		const unchanged = null === before || altUnchanged( state, before );
+		if ( unchanged ) {
 			writeAltFields( state, typeof data.alt_text === 'string' && data.alt_text ? data.alt_text : value );
 		}
 		finish( state );
-		const trigger = triggerFor( state );
-		announce( trigger ? regions( trigger ).status : null, t.saved );
+		if ( unchanged ) {
+			const trigger = triggerFor( state );
+			announce( trigger ? regions( trigger ).status : null, t.saved );
+		}
 	} catch ( error ) {
 		// Refused because the alt text changed meanwhile: the server's message
 		// says nothing was saved; the AI text stays in the session cache.
