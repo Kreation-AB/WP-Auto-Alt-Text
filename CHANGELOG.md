@@ -15,6 +15,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - **Extra instruktioner.** Ett fält för egna instruktioner, till exempel "Nämn alltid färgen". De läggs sist i pluginets instruktioner och kan inte ändra svarets format.
 - **Alt-textkontext.** I mediebiblioteket, på bildens redigeringssida och i förhandsgranskningen ser du vilken produkt, sida eller vilket inlägg alt-texten hör till, eller varför inget hittades. `wp auto-alt-text context <id>` visar samma sak i terminalen.
 - **Skilj på AI-text och text skriven av en redaktör.** Pluginet märker de alt-texter det skriver. Ändrar en redaktör texten räknas den som redaktörens egen, var ändringen än görs. En ny inställning, "Skriv över befintliga alt-texter vid massgenerering", bestämmer vad massåtgärder, REST och WP-CLI får skriva över: bara saknade alt-texter (standard), även oredigerade AI-texter, eller allt. Befintliga AI-texter från tidigare versioner märks automatiskt i bakgrunden efter uppdateringen.
+- **Filtret "Saknar alt-text" och kolumnen "Alt-text".** Mediebiblioteket (lista och rutnät) kan filtreras på bilder utan alt-text. I listläget visar en ny kolumn texten och vem som skrev den: "AI-skriven" eller "Skriven av en person". Statistikremsan på inställningssidan och "Hela biblioteket" länkar till den filtrerade listan.
 
 #### Modell och kostnad
 
@@ -27,6 +28,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - **Hantering av slut på krediter.** Om din OpenAI-kredit tar slut pausas genereringen. Webbplatsens administratör får ett mejl och ett meddelande i adminpanelen. Genereringen fortsätter av sig själv när krediten fyllts på, och inga köade bilder går förlorade.
 - **Överblick över kön.** Statistiksidan visar hur många bilder som väntar, bearbetas, är klara eller har misslyckats. I terminalen visar `wp auto-alt-text queue` kön, `--status=failed` listar felen och `--retry-failed` försöker igen med de misslyckade bilderna.
 - **Automatisk rensning av loggen.** Loggposter äldre än 30 dagar raderas en gång per dag.
+- **Massgenerering i mediebiblioteket körs i bakgrunden.** "Generera alt-text" i listläget och "Generera alt-text för markerade" i rutnätsläget lägger bilderna i kön, och du kan stänga fliken. En ruta i mediebiblioteket visar förloppet och ett ärligt resultat (fick alt-text, hoppades över, misslyckades, med länkar till bilderna). Du kan avbryta med "Avbryt" eller dölja rutan med "Dölj". En avvisad nyckel eller slut kredit pausar körningen i stället för att misslyckas på varje bild. Startar inte bakgrundskörningar på webbhotellet håller en öppen flik igång arbetet.
 - **Hela biblioteket.** Generera alt-text för alla bilder som saknar det i en bakgrundskörning med uppskattad kostnad, paus/fortsätt/avbryt, felrapport och statuskort på inställningssidan.
 
 #### WooCommerce
@@ -48,6 +50,9 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 
 - **Kortare och mer användbara alt-texter.** AI:n får nya instruktioner: högst cirka 125 tecken, huvudmotivet först, inga gissningar och inget säljspråk. Text som syns i bilden skrivs av exakt.
 - **Brand-tonalitet har ersatts av "Namn i alt-texten".** Påslagen brand-tonalitet blir "Produkt- och varumärkesnamn" och avslagen blir "Bara det som syns i bilden".
+- **Förhandsgranskningen är ombyggd.** Dialogen fungerar med tangentbord och skärmläsare: den är en inbyggd dialogruta, fokus stannar i den, Escape stänger bara dialogen och ändringar utropas för skärmläsare.
+- **Blockredigeraren visar en förhandsgranskning först.** Bildpanelen skriver ingenting förrän du klickar på "Använd".
+- **Köade jobb skriver inte över text som någon sparat under tiden.** Det gäller även med "Skriv över allt".
 
 #### Modell och kostnad
 
@@ -68,11 +73,12 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 
 #### WooCommerce
 
+- **Massåtgärder för produkter går lika snabbt som i mediebiblioteket.** De använder samma bakgrundskörning.
 - **Bilder köas bara när du sparar en produkt i adminpanelen.** Köp i kassan, lagerändringar, uppdateringar via REST/API och importer startar inte längre något. Importerade bilder tas fortfarande om hand när de laddas upp.
 
 #### Mediebiblioteket och adminpanelen
 
-- **Sidan laddas inte om.** När du genererar alt-text för flera bilder i mediebiblioteket visas ett "klart"-meddelande i stället för att sidan laddas om.
+- **Sidan laddas inte om.** När du genererar alt-text för flera bilder i mediebiblioteket visas förloppet i en ruta i stället för att sidan laddas om. Etiketterna är på svenska, och när AI-pluginets alt-textfunktion är aktiv står "(WP Auto Alt Text)" efter pluginets etiketter.
 - **Pluginets skript och stilmallar laddas bara där de behövs:** i mediebiblioteket, när du redigerar inlägg och produkter, på sidor med mediaväljaren och på pluginets egna sidor.
 - **API-nyckeln visas inte längre.** Fältet är ett lösenordsfält och visar aldrig den sparade nyckeln. Lämna fältet tomt för att behålla nuvarande nyckel.
 
@@ -106,6 +112,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - En saknad eller avvisad API-nyckel pausar nu kön i bakgrunden i stället för att markera alla köade bilder som misslyckade.
 - En bild som kraschar under bearbetningen blockerar inte längre kön för alltid.
 - Ett 429-svar (”för många anrop”) från OpenAI använder inte längre upp ett försök i kön. Bilden väntar tills gränsen har återställts och prövas sedan igen.
+- Köjobb som kördes av riktig WP-Cron misslyckades eftersom en WordPress-funktion (`wp_tempnam`) inte var laddad utanför adminpanelen. De fungerar nu.
 - Databasuppdateringen efter en ny version körs av adminpanelen, cron och WP-CLI, inte längre vid vanliga sidvisningar eller i kassan. Anrop turas om, och ett anrop som måste skriva till tabellerna väntar på en pågående uppdatering.
 
 #### WooCommerce
@@ -156,6 +163,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 
 - **Integrationerna för sidbyggare** (Divi, Beaver Builder, WPBakery, Elementor). De anropade OpenAI medan besökare tittade på sidor, vilket gjorde sidorna långsamma och kostade pengar. Divis galleri-integration kunde dessutom krascha. Bilderna tas om hand när de laddas upp, och sidbyggarna visar bildens vanliga alt-text.
 - **Visningsfiltren för WooCommerce** som skrev om bilders alt-text i butiken. WooCommerce använder redan varje bilds alt-text.
+- **Massloopen i webbläsaren** och dess AJAX-åtgärd. Massgenerering körs nu i bakgrunden på kön.
 - Oanvänd, dubblerad kod för massbearbetning och cachning.
 
 ### För utvecklare
@@ -187,7 +195,8 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 #### Cron, AJAX och REST
 
 - Nya WP-Cron-händelser: `aat_queue_tick` (varje minut), `aat_daily_maintenance` (dagligen) och `aat_provenance_backfill` (körs i omgångar efter uppdateringen). Alla tas bort när pluginet inaktiveras.
-- Ny AJAX-åtgärd: `aat_get_context`.
+- Ny AJAX-åtgärd: `aat_get_context`. AJAX-åtgärden för den gamla massloopen och skriptet `auto-alt-text-admin-js` är borttagna.
+- REST: ny asynkron `POST /wp-auto-alt-text/v1/bulk` som köar bilderna. `/batch` är oförändrad.
 - REST: `POST /wp-auto-alt-text/v1/generate` svarar `403` för bilder som användaren inte får redigera, och `/batch` rapporterar "Permission denied" för de bilderna.
 
 #### Tester och utvärdering
