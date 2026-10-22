@@ -41,6 +41,8 @@ class Auto_Alt_Text_Bulk_Runner_Test extends WP_UnitTestCase {
         remove_all_filters('aat_queue_time_budget');
         remove_all_filters('aat_queue_batch_size');
         remove_all_filters('aat_queue_time_budget');
+        delete_transient('auto_alt_text_rate_limit_state');
+        unset($_POST['token']);
         delete_option('aat_library_runner_lock');
         delete_option('aat_library_counts');
         delete_option('aat_library_start_lock');
@@ -137,7 +139,7 @@ class Auto_Alt_Text_Bulk_Runner_Test extends WP_UnitTestCase {
         $this->assertGreaterThanOrEqual($before, Auto_Alt_Text_Library_Runner::last_tick_at());
     }
 
-    public function test_active_run_chain_rules_are_unchanged() {
+    public function test_a_paused_run_chains_and_ticks_only_bulk_work() {
         global $wpdb;
         update_option('aat_library_counts', [
             'missing' => 1, 'ai' => 0, 'human' => 0, 'unsupported' => 0,
@@ -147,13 +149,49 @@ class Auto_Alt_Text_Bulk_Runner_Test extends WP_UnitTestCase {
         $run = Auto_Alt_Text_Library_Run::start('missing', 1);
         $this->assertIsArray($run);
         Auto_Alt_Text_Library_Run::pause($run['id']);
+        $this->assertSame('paused_user', Auto_Alt_Text_Library_Run::display_state(Auto_Alt_Text_Library_Run::active())['state']);
+
+        $run_attachment = $this->image();
+        (new Auto_Alt_Text_Queue())->enqueue($run_attachment, 'upload');
+        $wpdb->update(Auto_Alt_Text_Queue::get_table_name(), ['run_id' => $run['id']], ['attachment_id' => $run_attachment]);
+        $batch = $this->bulk_job();
+        $this->loopbacks = 0;
+
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::maybe_chain());
+        $this->assertSame(1, $this->loopbacks);
+
+        $this->assertGreaterThanOrEqual(1, Auto_Alt_Text_Library_Runner::tick_for_request(5.0));
+        $this->assertSame('done', $this->row_status($batch));
+        $this->assertSame('pending', $this->row_status($run_attachment));
+    }
+
+    private function handle_tick(): void {
+        $_POST['token'] = Auto_Alt_Text_Library_Runner::token();
+        try {
+            Auto_Alt_Text_Library_Runner::handle_tick_request();
+            $this->fail('Expected wp_die');
+        } catch (WPDieException $e) {
+            $this->assertSame(204, $e->getCode());
+        }
+        unset($_POST['token']);
+    }
+
+    public function test_an_idle_tick_without_a_run_does_not_chain_again() {
+        $this->bulk_job();
+        (new Auto_Alt_Text_Rate_Limiter())->record_rate_limit_error();
+        $this->assertFalse((new Auto_Alt_Text_Rate_Limiter())->can_make_request());
+        $this->loopbacks = 0;
+        $this->handle_tick();
+        $this->assertSame(0, $this->loopbacks);
+    }
+
+    public function test_a_productive_tick_without_a_run_chains_once_when_work_is_left() {
+        add_filter('aat_queue_batch_size', fn() => 1);
+        add_filter('aat_queue_time_budget', fn() => 0.001);
+        $this->bulk_job();
         $this->bulk_job();
         $this->loopbacks = 0;
-        $this->assertTrue(Auto_Alt_Text_Library_Runner::maybe_chain(), 'A paused run no longer blocks chaining for bulk work');
+        $this->handle_tick();
         $this->assertSame(1, $this->loopbacks);
-        $this->assertSame(0, (int) $wpdb->get_var($wpdb->prepare(
-            'SELECT COUNT(*) FROM ' . Auto_Alt_Text_Queue::get_table_name() . ' WHERE run_id = %d AND status <> %s',
-            $run['id'], Auto_Alt_Text_Queue::STATUS_PENDING
-        )));
     }
 }
