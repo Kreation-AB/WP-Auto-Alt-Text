@@ -71,6 +71,18 @@ class Auto_Alt_Text_Context_Field_Test extends WP_UnitTestCase {
         $this->assertStringNotContainsString('data-loaded', $html);
     }
 
+    public function test_context_placeholder_attributes() {
+        add_filter('wp_doing_ajax', '__return_true');
+        $id = $this->image_on_page();
+
+        $html = $this->fields_for($id)['aat_alt_context']['html'];
+
+        // media.js fills the empty placeholder; the Generate button lost its nonce, this span keeps its own.
+        $this->assertSame(1, preg_match('/^<span class="aat-alt-context" role="status" aria-live="polite" aria-label="Alt-textkontext" data-attachment-id="(\d+)" data-nonce="([0-9a-f]+)"><\/span>$/', $html, $m), $html);
+        $this->assertSame((string) $id, $m[1]);
+        $this->assertSame(1, wp_verify_nonce($m[2], 'auto_alt_text_nonce'));
+    }
+
     public function test_titles_are_escaped() {
         set_current_screen('attachment');
         $page = self::factory()->post->create(['post_type' => 'page', 'post_title' => 'Kök & <b>bad</b>']);

@@ -9,31 +9,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // unsaved edits.
     const isMediaLibraryScreen = document.body.classList.contains('upload-php');
 
-    // "Alt-textkontext" placeholders arrive empty in media modals; fill each once.
-    loadAltContextLines();
-    let contextLinesTimer = null;
-    new MutationObserver(() => {
-        clearTimeout(contextLinesTimer);
-        contextLinesTimer = setTimeout(loadAltContextLines, 100);
-    }).observe(document.body, { childList: true, subtree: true });
-
-    /**
-     * Listens for click events on the document and calls `handleSingleImageGeneration` if the clicked
-     * element has the 'generate-alt-text-button' class.
-     *
-     * @param {Event} event - The click event object.
-     */
-    document.addEventListener('click', function(event) {
-        if (event.target && event.target.classList.contains('generate-alt-text-button')) {
-            handleSingleImageGeneration(event);
-        }
-
-        if (isMediaLibraryScreen) {
-            scheduleBatchProcessingRefresh();
-        }
-    });
-
+    // The Generate button, its preview dialog and the "Alt-textkontext" line live in media.js.
     if (isMediaLibraryScreen) {
+        document.addEventListener('click', function() {
+            scheduleBatchProcessingRefresh();
+        });
         document.addEventListener('keyup', function() {
             scheduleBatchProcessingRefresh();
         });
@@ -151,7 +131,8 @@ document.addEventListener('DOMContentLoaded', function() {
 initBlockEditorImageAltTextGenerator();
 
 /**
- * Sends an AJAX request to the plugin endpoints and returns the payload.
+ * Sends an AJAX request to the plugin endpoints and returns the payload
+ * (the block editor panel below).
  *
  * @param {Object} params Request parameters.
  * @returns {Promise<Object>} The parsed payload.
@@ -172,29 +153,6 @@ async function sendAutoAltTextRequest(params) {
     }
 
     return data.data || data;
-}
-
-/**
- * Fills "Alt-textkontext" placeholders (spec §4a). The server leaves them
- * empty in media modal responses so the grid never pays for the lookup.
- *
- * @param {ParentNode} root Where to look for placeholders.
- */
-function loadAltContextLines(root = document) {
-    root.querySelectorAll('.aat-alt-context[data-attachment-id]:not([data-loaded])').forEach((element) => {
-        element.dataset.loaded = '1';
-        sendAutoAltTextRequest({
-            action: 'aat_get_context',
-            attachment_id: element.dataset.attachmentId,
-            nonce: element.dataset.nonce,
-        })
-            .then((data) => {
-                element.textContent = data.text || '';
-            })
-            .catch(() => {
-                element.textContent = '';
-            });
-    });
 }
 
 /**
@@ -365,62 +323,7 @@ function initBlockEditorImageAltTextGenerator() {
 }
 
 /**
- * Handles the generation of alternative text for a single image attachment.
- * This function is responsible for checking if a cached version of the alternative text
- * is available, and if not, it fetches the alternative text from the server and displays
- * a preview dialog for the user to review and apply the generated text.
- *
- * @param {Event} event - The event object passed to the event handler.
- */
-function handleSingleImageGeneration(event) {
-    event.preventDefault();
-    const button = event.target;
-    const attachmentId = button.dataset.attachmentId;
-    const nonce = button.dataset.nonce;
-    const loader = button.querySelector('.loader');
-
-    // Check for cached version in this session
-    const cachedText = sessionStorage.getItem(`alt_text_${attachmentId}`);
-    if (cachedText) {
-        showPreviewDialog(cachedText, attachmentId, true, sessionStorage.getItem(`alt_context_${attachmentId}`) || '');
-        return;
-    }
-
-    loader.style.display = 'inline-block';
-    fetch(ajaxurl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-            action: 'generate_alt_text_for_attachment',
-            attachment_id: attachmentId,
-            nonce: nonce,
-            preview: true
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success && data.data.alt_text) {
-            // Store the generated text in session storage
-            sessionStorage.setItem(`alt_text_${attachmentId}`, data.data.alt_text);
-            sessionStorage.setItem(`alt_context_${attachmentId}`, data.data.context || '');
-            showPreviewDialog(data.data.alt_text, attachmentId, false, data.data.context || '');
-        } else {
-            showError((data.data && data.data.message) || 'Alt text generation failed.');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        showError('Alt text generation failed.');
-    })
-    .finally(() => {
-        loader.style.display = 'none';
-    });
-}
-
-/**
- * Displays an error notice on the page.
+ * Displays an error notice on the page (the bulk loops below).
  *
  * @param {string} message - The error message to display.
  */
@@ -434,267 +337,6 @@ function showError(message) {
     const host = document.querySelector('.wrap') || document.body;
     host.insertBefore(notice, host.firstChild);
 }
-
-/**
- * Displays a preview dialog for the generated alt text of an attachment.
- *
- * @param {string} altText - The generated alt text to preview.
- * @param {string} attachmentId - The ID of the attachment.
- * @param {boolean} isCached - Indicates whether the alt text is from a cached version.
- * @param {string} contextText - The "Alt-textkontext" line, if known.
- */
-function showPreviewDialog(altText, attachmentId, isCached, contextText = '') {
-    const dialog = document.createElement('div');
-    const button = document.querySelector(`.generate-alt-text-button[data-attachment-id="${attachmentId}"]`);
-    const nonce = button.dataset.nonce;
-
-    dialog.className = 'alt-text-preview-dialog';
-    dialog.setAttribute('role', 'dialog');
-    dialog.setAttribute('aria-modal', 'true');
-    dialog.setAttribute('aria-labelledby', 'preview-title');
-
-    const brandVoiceButton = (typeof autoAltTextData !== 'undefined' && autoAltTextData.brandTonalityEnabled)
-      ? `<button class="button feedback-option" data-type="brand_voice">Brand voice</button>`
-      : '';
-
-    const feedbackEnabled = typeof autoAltTextData === 'undefined' || autoAltTextData.feedbackEnabled !== false;
-    const feedbackSection = feedbackEnabled ? `
-            <div class="feedback-section">
-                <div class="feedback-header">
-                    <h4>Inte nöjd? Förbättra denna alt text</h4>
-                    <small>OBS: Detta kommer att räknas som en ny begäran, med tillkommande kostnad.</small>
-                </div>
-                <div class="feedback-options">
-                    <button class="button feedback-option" data-type="more_descriptive">Mer beskrivande</button>
-                    <button class="button feedback-option" data-type="more_concise">Mer kortfattad</button>
-                    <button class="button feedback-option" data-type="more_accessible">Mer tillgänglig</button>
-                    <button class="button feedback-option" data-type="better_seo">Sökmotorsanpassad</button>
-                    <button class="button feedback-option" data-type="technical_accuracy">Teknisk noggrannhet</button>
-                    ${brandVoiceButton}
-                </div>
-                <div class="custom-feedback">
-                    <textarea placeholder="Eller skriv din egen feedback..." class="custom-feedback-text"></textarea>
-                    <button class="button custom-feedback-submit">Skicka egen feedback</button>
-                </div>
-            </div>
-` : '';
-
-    dialog.innerHTML = `
-        <div class="alt-text-preview-content">
-            <h3 id="preview-title">Förhandsgranska alternativ text ${isCached ? '<span class="cached-badge">Cachead</span>' : ''}</h3>
-            <p class="aat-preview-context" id="aat-preview-context"></p>
-            <textarea class="preview-text" aria-label="Alt text"></textarea>
-
-            ${feedbackSection}
-
-            <div class="preview-actions">
-                <button class="button button-primary apply-alt-text">Applicera</button>
-                ${isCached ? '<button class="button regenerate-alt-text">Generera ny alternativ text</button>' : ''}
-                <button class="button button-secondary cancel-alt-text">Avbryt</button>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(dialog);
-
-    const textarea = dialog.querySelector('.preview-text');
-    const contextLine = dialog.querySelector('.aat-preview-context');
-    if (contextText) {
-        // Server text: assign it, never interpolate it into HTML.
-        contextLine.textContent = `Alt-textkontext: ${contextText}`;
-        // Screen readers hear the context together with the text it applies to.
-        textarea.setAttribute('aria-describedby', contextLine.id);
-    } else {
-        contextLine.remove();
-    }
-
-    // AI output is untrusted text: assign it, never interpolate it into HTML.
-    textarea.value = altText;
-    textarea.focus();
-    textarea.setSelectionRange(0, textarea.value.length);
-
-    // Text regenerated with feedback is AI output too: it becomes the baseline
-    // that Apply compares against, so applying it unchanged keeps it AI-written.
-    const setBaseline = (regeneratedText) => {
-        altText = regeneratedText;
-    };
-
-    if (feedbackEnabled) {
-        // Add event listeners for feedback buttons
-        dialog.querySelectorAll('.feedback-option').forEach(button => {
-            button.addEventListener('click', () => {
-                const improvementType = button.dataset.type;
-                regenerateAltTextWithFeedback(attachmentId, nonce, improvementType, '', altText, dialog, setBaseline);
-            });
-        });
-
-        // Add event listener for custom feedback
-        dialog.querySelector('.custom-feedback-submit').addEventListener('click', () => {
-            const customFeedback = dialog.querySelector('.custom-feedback-text').value;
-            if (customFeedback.trim()) {
-                regenerateAltTextWithFeedback(attachmentId, nonce, 'custom', customFeedback, altText, dialog, setBaseline);
-            } else {
-                alert('Please enter your feedback before submitting.');
-            }
-        });
-    }
-
-    /**
-     * Handles the click event on the "Apply" button in the alt text preview dialog.
-     * It updates the alt text for the selected attachment, saves the updated text to the session storage,
-     * and updates the alt text fields in the attachment details.
-     */
-    dialog.querySelector('.apply-alt-text').addEventListener('click', () => {
-        const finalText = dialog.querySelector('.preview-text').value;
-        const isEdited = finalText.trim() !== altText.trim();
-        const applyButton = dialog.querySelector('.apply-alt-text');
-        applyButton.disabled = true;
-        applyButton.textContent = 'Applying...';
-
-        fetch(ajaxurl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-                action: 'apply_alt_text',
-                attachment_id: attachmentId,
-                alt_text: finalText,
-                original_text: altText,
-                is_edited: isEdited ? '1' : '0',
-                nonce: nonce
-            })
-        })
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return response.json();
-        })
-        .then(data => {
-            if (data.success) {
-                const altTextFields = document.querySelectorAll('#attachment-details-two-column-alt-text, #attachment-details-alt-text, #attachment_alt');
-                altTextFields.forEach(field => {
-                    field.value = finalText;
-                    // wp.media views sync their model on change; without this the
-                    // model keeps the old alt and "Update"/"Insert" writes it back.
-                    field.dispatchEvent(new Event('change', { bubbles: true }));
-                });
-                sessionStorage.setItem(`alt_text_${attachmentId}`, finalText);
-            } else {
-                throw new Error((data.data && data.data.message) || 'Failed to update alt text');
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            showError(`Failed to update alt text: ${error.message}`);
-        })
-        .finally(() => {
-            dialog.remove();
-        });
-    });
-
-    // Add regenerate functionality if showing cached version
-    if (isCached) {
-        dialog.querySelector('.regenerate-alt-text').addEventListener('click', () => {
-            sessionStorage.removeItem(`alt_text_${attachmentId}`);
-            dialog.remove();
-            document.querySelector(`.generate-alt-text-button[data-attachment-id="${attachmentId}"]`).click();
-        });
-    }
-
-    // Handle cancel
-    dialog.querySelector('.cancel-alt-text').addEventListener('click', () => dialog.remove());
-
-    // Listens for the 'keydown' event on the document and removes the 'dialog' element if the 'Escape' key is pressed.
-    // It also removes the event listener to prevent further handling of the 'keydown' event.
-    document.addEventListener('keydown', function handleEscape(e) {
-        if (e.key === 'Escape') {
-            dialog.remove();
-            document.removeEventListener('keydown', handleEscape);
-        }
-    });
-}
-
-/**
- * Regenerates alt text based on user feedback.
- *
- * @param {string} attachmentId - The ID of the attachment.
- * @param {string} nonce - The security nonce.
- * @param {string} improvementType - The type of improvement requested.
- * @param {string} customFeedback - Any custom feedback provided by the user.
- * @param {string} originalAltText - The original alt text.
- * @param {Element} dialog - The dialog element containing the preview.
- * @param {Function} [onRegenerated] - Called with the regenerated text on success.
- */
-function regenerateAltTextWithFeedback(attachmentId, nonce, improvementType, customFeedback, originalAltText, dialog, onRegenerated) {
-    // Show loading state
-    const textarea = dialog.querySelector('.preview-text');
-    const originalText = textarea.value;
-    textarea.disabled = true;
-    textarea.value = 'Genererar alternativ text efter feedback...';
-
-    // Disable all feedback buttons
-    const feedbackButtons = dialog.querySelectorAll('.feedback-option, .custom-feedback-submit');
-    feedbackButtons.forEach(btn => btn.disabled = true);
-
-    fetch(ajaxurl, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-            action: 'regenerate_alt_text_with_feedback',
-            attachment_id: attachmentId,
-            nonce: nonce,
-            improvement_type: improvementType,
-            custom_feedback: customFeedback,
-            original_alt_text: originalAltText
-        })
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success && data.data.alt_text) {
-            // Update the preview with the new alt text
-            textarea.value = data.data.alt_text;
-            if (onRegenerated) {
-                onRegenerated(data.data.alt_text);
-            }
-
-            // Store the new generated text in session storage
-            sessionStorage.setItem(`alt_text_${attachmentId}`, data.data.alt_text);
-
-            // Show success indicator
-            const feedbackSection = dialog.querySelector('.feedback-section');
-            const successMessage = document.createElement('div');
-            successMessage.className = 'feedback-success';
-            successMessage.textContent = 'Ny alternativ text har genererats';
-            feedbackSection.prepend(successMessage);
-
-            // Remove the success message after 3 seconds
-            setTimeout(() => {
-                if (successMessage.parentNode) {
-                    successMessage.parentNode.removeChild(successMessage);
-                }
-            }, 3000);
-        } else {
-            // Restore original text in case of error
-            textarea.value = originalText;
-            alert('Failed to improve alt text: ' + (data.data?.message || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        textarea.value = originalText;
-        alert('Error processing your feedback. Please try again.');
-    })
-    .finally(() => {
-        // Re-enable elements
-        textarea.disabled = false;
-        feedbackButtons.forEach(btn => btn.disabled = false);
-    });
-}
-
 
 /**
  * Handles the batch processing of generating alt text for selected images.

@@ -12,6 +12,8 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
         remove_filter('script_loader_tag', 'auto_alt_text_settings_module_tag', 10);
         wp_dequeue_script('auto-alt-text-media-library');
         wp_deregister_script('auto-alt-text-media-library');
+        wp_dequeue_script('auto-alt-text-media');
+        wp_deregister_script('auto-alt-text-media');
         wp_dequeue_script('auto-alt-text-admin-js');
         wp_dequeue_style('auto_alt_text_css');
         // Localized data accumulates on the registered handle; start each test clean.
@@ -57,24 +59,6 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
         do_action('wp_enqueue_media');
         do_action('admin_enqueue_scripts', 'upload.php');
         $this->assertSame(1, substr_count((string) wp_scripts()->get_data('auto-alt-text-admin-js', 'data'), 'var autoAltTextData'));
-    }
-
-    public function test_media_modal_assets_localize_the_feedback_switch() {
-        // Read the JS the page gets, not the PHP array.
-        $localized = static function (): string {
-            wp_dequeue_script('auto-alt-text-admin-js');
-            wp_deregister_script('auto-alt-text-admin-js');
-            set_current_screen('upload');
-            do_action('wp_enqueue_media');
-            $scripts = wp_scripts();
-            return $scripts->get_data('auto-alt-text-admin-js', 'data') . implode("\n", (array) $scripts->get_data('auto-alt-text-admin-js', 'before'));
-        };
-
-        update_option('auto_alt_text_enable_feedback', true);
-        $this->assertMatchesRegularExpression('/feedbackEnabled = true;/', $localized());
-
-        update_option('auto_alt_text_enable_feedback', false);
-        $this->assertMatchesRegularExpression('/feedbackEnabled = false;/', $localized());
     }
 
     public function test_media_modal_outside_admin_enqueues_nothing() {
@@ -152,5 +136,109 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
             $this->assertStringContainsString('&_wpnonce=', $cfg['links'][$key]);
             $this->assertStringNotContainsString('&amp;', $cfg['links'][$key]);
         }
+    }
+
+    private function reset_media_handle(): void {
+        wp_dequeue_script('auto-alt-text-media');
+        wp_deregister_script('auto-alt-text-media');
+        wp_dequeue_script('auto-alt-text-admin-js');
+        wp_deregister_script('auto-alt-text-admin-js');
+    }
+
+    /** The aatMedia config the page gets, decoded from the 'before' inline script. */
+    private function media_config(): array {
+        $before = implode("\n", array_filter((array) wp_scripts()->get_data('auto-alt-text-media', 'before')));
+        $this->assertSame(1, preg_match('/^var aatMedia = (\{.*\});$/s', $before, $m), $before);
+        $cfg = json_decode($m[1], true);
+        $this->assertIsArray($cfg);
+        return $cfg;
+    }
+
+    public function test_media_js_loads_with_wp_enqueue_media_and_on_attachment_screens() {
+        // Any admin screen with a media frame.
+        set_current_screen('site-editor');
+        do_action('wp_enqueue_media');
+        $this->assertTrue(wp_script_is('auto-alt-text-media', 'enqueued'));
+        $script = wp_scripts()->registered['auto-alt-text-media'];
+        $this->assertStringEndsWith('/admin/js/media.js', $script->src);
+        $this->assertSame(AUTO_ALT_TEXT_VERSION, $script->ver);
+        $this->assertContains('auto-alt-text-media', Auto_Alt_Text_Admin::MODULE_HANDLES);
+        $tag = apply_filters('script_loader_tag', "<script src='m.js' id='auto-alt-text-media-js'></script>\n", 'auto-alt-text-media', 'm.js');
+        $this->assertSame("<script type=\"module\" src='m.js' id='auto-alt-text-media-js'></script>\n", $tag);
+
+        // Both hooks on one screen print the config once.
+        $this->reset_media_handle();
+        set_current_screen('upload');
+        do_action('wp_enqueue_media');
+        do_action('admin_enqueue_scripts', 'upload.php');
+        $this->assertTrue(wp_script_is('auto-alt-text-media', 'enqueued'));
+        $this->assertSame(1, substr_count(implode("\n", (array) wp_scripts()->get_data('auto-alt-text-media', 'before')), 'var aatMedia'));
+
+        // The Media Library in list mode never calls wp_enqueue_media().
+        $this->reset_media_handle();
+        do_action('admin_enqueue_scripts', 'upload.php');
+        $this->assertTrue(wp_script_is('auto-alt-text-media', 'enqueued'));
+
+        // The attachment edit screen renders the button without a media frame.
+        $this->reset_media_handle();
+        set_current_screen('attachment');
+        do_action('admin_enqueue_scripts', 'post.php');
+        $this->assertTrue(wp_script_is('auto-alt-text-media', 'enqueued'));
+
+        // A post edit screen without a media frame does not get it.
+        $this->reset_media_handle();
+        set_current_screen('edit-post');
+        set_current_screen('post');
+        do_action('admin_enqueue_scripts', 'post.php');
+        $this->assertFalse(wp_script_is('auto-alt-text-media', 'enqueued'));
+        $this->assertTrue(wp_script_is('auto-alt-text-admin-js', 'enqueued'), 'app.js keeps loading where it did');
+
+        // Nor does the front end.
+        $this->reset_media_handle();
+        set_current_screen('front');
+        do_action('wp_enqueue_media');
+        $this->assertFalse(wp_script_is('auto-alt-text-media', 'enqueued'));
+    }
+
+    public function test_media_js_does_not_load_on_the_plugins_own_pages() {
+        foreach (['toplevel_page_auto-alt-text', 'auto-alt-text_page_auto-alt-text-library'] as $hook) {
+            $this->reset_media_handle();
+            wp_dequeue_style('auto_alt_text_css');
+            do_action('admin_enqueue_scripts', $hook);
+            $this->assertFalse(wp_script_is('auto-alt-text-media', 'enqueued'), $hook);
+            $this->assertTrue(wp_style_is('auto_alt_text_css', 'enqueued'), $hook . ' keeps style.css (spec §5.6)');
+        }
+    }
+
+    public function test_media_config_booleans_are_real() {
+        $config = function (): array {
+            $this->reset_media_handle();
+            set_current_screen('upload');
+            do_action('wp_enqueue_media');
+            return $this->media_config();
+        };
+
+        update_option('auto_alt_text_enable_feedback', true);
+        update_option(Auto_Alt_Text_Prompt::NAMING_OPTION, Auto_Alt_Text_Prompt::NAMING_VISIBLE);
+        $cfg = $config();
+        $this->assertSame(admin_url('admin-ajax.php'), $cfg['ajaxUrl']);
+        $this->assertSame(1, wp_verify_nonce($cfg['nonce'], 'auto_alt_text_nonce') ? 1 : 0);
+        $this->assertTrue($cfg['feedbackEnabled']);
+        $this->assertFalse($cfg['brandTonalityEnabled']);
+        $this->assertSame(Auto_Alt_Text_Admin::media_strings(), $cfg['i18n']);
+        $this->assertSame('Förhandsgranska alt-text', $cfg['i18n']['title']);
+
+        update_option('auto_alt_text_enable_feedback', false);
+        update_option(Auto_Alt_Text_Prompt::NAMING_OPTION, Auto_Alt_Text_Prompt::NAMING_PRODUCT_BRAND);
+        $cfg = $config();
+        $this->assertFalse($cfg['feedbackEnabled']);
+        $this->assertTrue($cfg['brandTonalityEnabled']);
+
+        // The raw JSON carries real booleans, not "1" or "".
+        $before = implode("\n", (array) wp_scripts()->get_data('auto-alt-text-media', 'before'));
+        $this->assertStringContainsString('"feedbackEnabled":false', $before);
+        $this->assertStringContainsString('"brandTonalityEnabled":true', $before);
+        delete_option('auto_alt_text_enable_feedback');
+        delete_option(Auto_Alt_Text_Prompt::NAMING_OPTION);
     }
 }

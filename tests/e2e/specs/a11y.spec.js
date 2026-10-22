@@ -81,9 +81,10 @@ test.describe( 'accessibility', () => {
 
 	test( 'preview dialog has none', async ( { page } ) => {
 		await openDetails( page );
-		await page.locator( '.generate-alt-text-button' ).click();
-		await expect( page.locator( '#preview-title' ) ).toBeVisible();
-		await checkA11y( page, { pageName: 'preview-dialog', include: '.alt-text-preview-dialog' } );
+		await page.locator( '.aat-generate' ).click();
+		await expect( page.locator( '#aat-preview-title' ) ).toBeVisible();
+		await expect( page.locator( '#aat-preview-text' ) ).toBeFocused();
+		await checkA11y( page, { pageName: 'preview-dialog', include: 'dialog.aat-preview-dialog' } );
 	} );
 
 	test( 'bulk progress notice has none while running and when finished', async ( { page } ) => {

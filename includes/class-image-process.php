@@ -40,11 +40,9 @@ class Auto_Alt_Text_Image_Process {
   }
 
   /**
-   * Adds a custom "Generate Alt Text" button to the WordPress media library attachment form.
-   *
-   * This method checks if the OpenAI API key is configured. If not, it displays a warning notice
-   * instead of the button. If the API key is set, it creates a button that, when clicked, triggers
-   * the generation of alternative text for the attachment using the OpenAI API.
+   * The "Alt-text med AI" field in attachment details: the Generate button,
+   * which admin/js/media.js drives, or a notice linking to the settings when
+   * no API key is configured. The nonce comes from media.js's config.
    *
    * @param array $form_fields The attachment form fields.
    * @param WP_Post $post The attachment post object.
@@ -52,41 +50,29 @@ class Auto_Alt_Text_Image_Process {
    */
   public function add_custom_generate_alt_text_button($form_fields, $post) {
     $api_key = get_option('auto_alt_text_api_key');
+    // Core prints compat field labels as they are.
+    $label = esc_html(Auto_Alt_Text_Coexistence::label(__('Alt-text med AI', 'WP-Auto-Alt-Text')));
 
-    // If no API key is set, show a notice instead of the button
     if (empty($api_key) && !defined('AUTO_ALT_TEXT_OPENAI_API_KEY')) {
         $form_fields['generate_alt_text'] = array(
-            'label' => __('Generate Alt Text', 'WP-Auto-Alt-Text'),
+            'label' => $label,
             'input' => 'html',
             'html' => '<div class="notice notice-warning inline"><p>' .
-                    esc_html__('Please configure your OpenAI API key in the Auto Alt Text settings to enable AI generation.', 'WP-Auto-Alt-Text') .
+                    esc_html__('Ange en API-nyckel i inställningarna för att generera alt-text.', 'WP-Auto-Alt-Text') .
                     ' <a href="' . esc_url(admin_url('admin.php?page=auto-alt-text')) . '">' .
-                    esc_html__('Configure Now', 'WP-Auto-Alt-Text') . '</a></p></div>'
+                    esc_html__('Öppna inställningarna', 'WP-Auto-Alt-Text') . '</a></p></div>'
         );
         return $form_fields;
     }
 
-    $nonce = wp_create_nonce('auto_alt_text_nonce');
     $form_fields['generate_alt_text'] = array(
-        'label' => __('Generate Alt Text', 'WP-Auto-Alt-Text'),
+        'label' => $label,
         'input' => 'html',
-        'html' => '<button class="generate-alt-text-button" id="generate-alt-text" data-attachment-id="' . $post->ID . '" data-nonce="' . $nonce . '">' . __('Generate Alternative Text with AI', 'WP-Auto-Alt-Text') .
-        '<div class="generate-alt-text-loader loader loader--style2" title="1" style="display: none;">
-          <svg version="1.1" id="loader-1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
-            width="40px" height="40px" viewBox="0 0 50 50" style="enable-background:new 0 0 50 50;" xml:space="preserve">
-          <path fill="#2271b1" d="M25.251,6.461c-10.318,0-18.683,8.365-18.683,18.683h4.068c0-8.071,6.543-14.615,14.615-14.615V6.461z">
-            <animateTransform attributeType="xml"
-              attributeName="transform"
-              type="rotate"
-              from="0 25 25"
-              to="360 25 25"
-              dur="0.6s"
-              repeatCount="indefinite"/>
-            </path>
-          </svg>
-        </div>
-        </button>',
-        // You can also include a nonce for security
+        'html' => sprintf(
+            '<button type="button" class="button aat-generate" data-attachment-id="%s">%s</button><span class="spinner aat-generate-spinner"></span>',
+            esc_attr((string) (int) $post->ID),
+            esc_html(Auto_Alt_Text_Coexistence::label(__('Generera alt-text', 'WP-Auto-Alt-Text')))
+        ),
     );
 
     return $form_fields;
@@ -96,7 +82,7 @@ class Auto_Alt_Text_Image_Process {
    * "Alt-textkontext" (generation-quality spec §4a): which product, page or
    * post the alt text is tied to. Resolved here only on the attachment edit
    * screen. Media modals receive these fields in AJAX grid responses for
-   * every attachment, so there a placeholder is rendered and app.js fills it.
+   * every attachment, so there a placeholder is rendered and media.js fills it.
    */
   public function add_context_field($form_fields, $post) {
     if (!$post instanceof WP_Post || !wp_attachment_is_image($post->ID)) {
@@ -107,7 +93,7 @@ class Auto_Alt_Text_Image_Process {
         $text = Auto_Alt_Text_Context::describe(Auto_Alt_Text_Context::explain($post->ID));
         $html = '<span class="aat-alt-context" data-loaded="1">' . esc_html($text) . '</span>';
     } else {
-        // Filled later by app.js: a status region named after the field's label.
+        // Filled later by media.js: a status region named after the field's label.
         $html = '<span class="aat-alt-context" role="status" aria-live="polite" aria-label="' . esc_attr__('Alt-textkontext', 'WP-Auto-Alt-Text')
             . '" data-attachment-id="' . esc_attr($post->ID)
             . '" data-nonce="' . esc_attr(wp_create_nonce('auto_alt_text_nonce')) . '"></span>';
