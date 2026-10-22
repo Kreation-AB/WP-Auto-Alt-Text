@@ -24,6 +24,7 @@ class Auto_Alt_Text_Admin {
     public function __construct() {
         add_action('bulk_actions-upload', [$this, 'add_bulk_actions']);
         add_filter('handle_bulk_actions-upload', [$this, 'handle_bulk_actions'], 10, 3);
+        add_filter('removable_query_args', [$this, 'add_removable_query_args']);
         add_action('admin_enqueue_scripts', [$this, 'enqueueAutoAltTextScript']);
         // The Generate button is rendered in every wp.media modal (site editor,
         // widgets, customizer, term screens...), not only on MEDIA_SCREENS.
@@ -37,34 +38,52 @@ class Auto_Alt_Text_Admin {
      * @return array The updated bulk actions array.
      */
     public function add_bulk_actions($bulk_actions) {
-        $bulk_actions['generate_alt_text'] = __('Generate Alt Text', 'WP-Auto-Alt-Text');
+        $bulk_actions['generate_alt_text'] = Auto_Alt_Text_Coexistence::label(__('Generera alt-text', 'WP-Auto-Alt-Text'));
         return $bulk_actions;
     }
 
-    /**
-     * Handles the bulk action for generating alt text for selected media items.
-     *
-     * This method is called when the 'Generate Alt Text' bulk action is selected in the media library.
-     * It checks if the selected action is 'generate_alt_text', enqueues the necessary script, and
-     * returns a redirect URL with query parameters to indicate the number of items to be processed
-     * and the IDs of the selected media items.
-     *
-     * @param string $redirect_to The original redirect URL.
-     * @param string $doaction The selected bulk action.
-     * @param array $post_ids The IDs of the selected media items.
-     * @return string The updated redirect URL with query parameters.
-     */
+    /** The list-mode bulk action queues the selection on the server and returns to the same list view. */
     public function handle_bulk_actions($redirect_to, $doaction, $post_ids) {
         if ($doaction !== 'generate_alt_text') {
             return $redirect_to;
         }
+        $url = remove_query_arg(['bulk_generate_alt_text', 'bulk_ids', 'processed', 'failed', 'aat_bulk'], $redirect_to);
+        if (!current_user_can('upload_files')) {
+            return $url;
+        }
+        $result = Auto_Alt_Text_Bulk::request(get_current_user_id(), (array) $post_ids);
+        $flag = is_wp_error($result) ? preg_replace('/^aat_bulk_/', '', $result->get_error_code()) : 'queued';
+        return add_query_arg('aat_bulk', $flag, $url);
+    }
 
-        return add_query_arg([
-            'bulk_generate_alt_text' => count($post_ids),
-            'bulk_ids' => implode(',', $post_ids),
-            'processed' => 0,
-            'failed' => 0
-        ], $redirect_to);
+    /** One-time flag that core drops from the address bar. */
+    public function add_removable_query_args($args) {
+        return array_merge((array) $args, ['aat_bulk']);
+    }
+
+    /** Verifies the bulk controls' nonce and capability, runs the action and returns the URL to go back to. */
+    public static function process_bulk_control(string $action): string {
+        check_admin_referer('aat_bulk');
+        if (!current_user_can('upload_files')) {
+            wp_die(esc_html__('Du har inte behörighet att göra det här.', 'WP-Auto-Alt-Text'), '', ['response' => 403]);
+        }
+        if ('cancel' === $action) {
+            Auto_Alt_Text_Bulk::cancel(get_current_user_id());
+        } else {
+            Auto_Alt_Text_Bulk::dismiss(get_current_user_id());
+        }
+        $back = wp_get_referer();
+        return $back ? $back : admin_url('upload.php');
+    }
+
+    public static function handle_bulk_dismiss(): void {
+        wp_safe_redirect(self::process_bulk_control('dismiss'));
+        exit;
+    }
+
+    public static function handle_bulk_cancel(): void {
+        wp_safe_redirect(self::process_bulk_control('cancel'));
+        exit;
     }
 
     /**

@@ -55,6 +55,70 @@ class Auto_Alt_Text_REST_API {
         ]);
 
         $this->register_library_routes();
+        $this->register_bulk_routes();
+    }
+
+    private function register_bulk_routes() {
+        $permission = static fn() => current_user_can('upload_files');
+        register_rest_route($this->namespace, '/bulk', [
+            [
+                'methods' => 'POST',
+                'callback' => [$this, 'bulk_request'],
+                'permission_callback' => $permission,
+                'args' => [
+                    'attachment_ids' => [
+                        'required' => true,
+                        'type' => 'array',
+                        'items' => ['type' => 'integer', 'minimum' => 1],
+                    ],
+                ],
+            ],
+            [
+                'methods' => 'GET',
+                'callback' => static fn() => new WP_REST_Response(['bulk' => Auto_Alt_Text_Bulk::progress(get_current_user_id())], 200),
+                'permission_callback' => $permission,
+            ],
+        ]);
+        register_rest_route($this->namespace, '/bulk/dismiss', [
+            'methods' => 'POST',
+            'callback' => static function () {
+                Auto_Alt_Text_Bulk::dismiss(get_current_user_id());
+                return new WP_REST_Response(['bulk' => null], 200);
+            },
+            'permission_callback' => $permission,
+        ]);
+        register_rest_route($this->namespace, '/bulk/cancel', [
+            'methods' => 'POST',
+            'callback' => static function () {
+                $cancelled = Auto_Alt_Text_Bulk::cancel(get_current_user_id());
+                return new WP_REST_Response(['cancelled' => $cancelled, 'bulk' => Auto_Alt_Text_Bulk::progress(get_current_user_id())], 200);
+            },
+            'permission_callback' => $permission,
+        ]);
+        register_rest_route($this->namespace, '/bulk/tick', [
+            'methods' => 'POST',
+            'callback' => [$this, 'bulk_tick'],
+            'permission_callback' => $permission,
+        ]);
+    }
+
+    public function bulk_request($request) {
+        $result = Auto_Alt_Text_Bulk::request(get_current_user_id(), (array) $request->get_param('attachment_ids'));
+        if (is_wp_error($result)) {
+            return $result;
+        }
+        return new WP_REST_Response($result, 202);
+    }
+
+    /** One budgeted queue tick from the open tab, for hosts where the loopback chain cannot run. */
+    public function bulk_tick($request) {
+        $user = get_current_user_id();
+        $bulk = Auto_Alt_Text_Bulk::progress($user);
+        if (null === $bulk || 'finished' === ($bulk['state'] ?? '')) {
+            return new WP_Error('aat_bulk_not_running', __('Ingen generering pågår.', 'WP-Auto-Alt-Text'), ['status' => 409]);
+        }
+        $processed = Auto_Alt_Text_Library_Runner::tick_for_request((float) apply_filters('aat_bulk_tab_tick_budget', 15.0));
+        return new WP_REST_Response(['ticked' => null !== $processed, 'bulk' => Auto_Alt_Text_Bulk::progress($user)], 200);
     }
 
     private function register_library_routes() {
