@@ -6,6 +6,7 @@ const { respText, wpCli, getOption, restoreOption, provenance } = require( '../u
 const RESP_TEXT = respText();
 const SAMPLE = path.resolve( __dirname, '../assets/sample.jpg' );
 const HUMAN_TEXT = 'En text som en person skrev';
+const TYPED_TEXT = 'Skriven av redaktören';
 
 /** Matches the admin-ajax request of one plugin action. */
 function isAjax( request, action ) {
@@ -279,6 +280,132 @@ test.describe( 'media modal', () => {
 		await page.locator( '.edit-media-header .left' ).click();
 		await expect( page.locator( '#attachment-details-two-column-alt-text' ) ).toHaveValue( RESP_TEXT );
 		expect( await altOf( b ) ).toBe( HUMAN_TEXT );
+	} );
+
+	/** Matches core's save of an attachment's settings (not save-attachment-compat). */
+	function isCoreSave( request ) {
+		return request.url().includes( 'admin-ajax.php' ) && new URLSearchParams( request.postData() || '' ).get( 'action' ) === 'save-attachment';
+	}
+
+	/** Records every core save that would write `text` as the alt text. */
+	function watchAltSaves( page, text ) {
+		const saves = [];
+		page.on( 'request', ( request ) => {
+			if ( isCoreSave( request ) && new URLSearchParams( request.postData() || '' ).get( 'changes[alt]' ) === text ) {
+				saves.push( request.url() );
+			}
+		} );
+		return saves;
+	}
+
+	/**
+	 * Lets the matching admin-ajax request reach the server at once and holds
+	 * its response until release(); `served` settles once the server answered.
+	 */
+	async function holdResponse( page, action ) {
+		let release;
+		let answered;
+		const gate = new Promise( ( resolve ) => {
+			release = resolve;
+		} );
+		const served = new Promise( ( resolve ) => {
+			answered = resolve;
+		} );
+		await page.route( '**/wp-admin/admin-ajax.php', async ( route ) => {
+			if ( ! isAjax( route.request(), action ) ) {
+				await route.continue();
+				return;
+			}
+			const response = await route.fetch();
+			answered();
+			await gate;
+			await route.fulfill( { response } );
+		} );
+		return { served, release: () => release() };
+	}
+
+	/**
+	 * Clicks "Använd" in the open preview, closes the dialog with Escape while
+	 * the request runs, then types into the same attachment's alt field and
+	 * leaves it, so core saves the typed text.
+	 */
+	async function applyEscapeAndType( page, mediaId, served ) {
+		const dialog = page.locator( 'dialog.aat-preview-dialog' );
+		await dialog.locator( '.aat-preview-apply' ).click();
+		await served;
+		await page.keyboard.press( 'Escape' );
+		await expect( dialog ).toHaveCount( 0 );
+
+		const field = page.locator( '#attachment-details-two-column-alt-text' );
+		const saved = page.waitForResponse( ( response ) => isCoreSave( response.request() ) );
+		await field.fill( TYPED_TEXT );
+		await field.press( 'Tab' );
+		await saved;
+		expect( await altOf( mediaId ) ).toBe( TYPED_TEXT );
+		return field;
+	}
+
+	test( 'a late apply after Escape does not overwrite typed alt text (response delayed)', async ( { page } ) => {
+		const media = await openDetails( page );
+		const aiSaves = watchAltSaves( page, RESP_TEXT );
+		await page.locator( '.aat-generate' ).click();
+		await expect( page.locator( '#aat-preview-text' ) ).toHaveValue( RESP_TEXT );
+
+		// The server writes the AI text first, then the person's save lands.
+		const { served, release } = await holdResponse( page, 'apply_alt_text' );
+		const field = await applyEscapeAndType( page, media.id, served );
+
+		const answered = page.waitForResponse( ( response ) => isAjax( response.request(), 'apply_alt_text' ) );
+		release();
+		expect( ( await ( await answered ).json() ).success ).toBe( true );
+
+		// Give a change-triggered save time to happen, then read the server again.
+		await page.waitForTimeout( 1500 );
+		await expect( field ).toHaveValue( TYPED_TEXT );
+		expect( await altOf( media.id ) ).toBe( TYPED_TEXT );
+		expect( aiSaves ).toEqual( [] );
+	} );
+
+	test( 'a late apply after Escape does not overwrite typed alt text (request delayed)', async ( { page } ) => {
+		const media = await openDetails( page );
+		const aiSaves = watchAltSaves( page, RESP_TEXT );
+		await page.locator( '.aat-generate' ).click();
+		await expect( page.locator( '#aat-preview-text' ) ).toHaveValue( RESP_TEXT );
+
+		// The request itself waits, so the person's save reaches the server first.
+		const release = await holdAjax( page, 'apply_alt_text' );
+		const field = await applyEscapeAndType( page, media.id, null );
+
+		const answered = page.waitForResponse( ( response ) => isAjax( response.request(), 'apply_alt_text' ) );
+		release();
+		// The server refused: the alt text was no longer what the modal read at Apply.
+		expect( ( await ( await answered ).json() ).data.code ).toBe( 'aat_alt_changed' );
+		await expect( page.locator( '.aat-generate-error[role="alert"]' ) ).toHaveText( 'Alt-texten har ändrats under tiden. Inget sparades.' );
+
+		await page.waitForTimeout( 1500 );
+		await expect( field ).toHaveValue( TYPED_TEXT );
+		expect( await altOf( media.id ) ).toBe( TYPED_TEXT );
+		expect( aiSaves ).toEqual( [] );
+		// The AI text stays in the session cache as an unapplied text.
+		expect( await page.evaluate( ( id ) => window.sessionStorage.getItem( 'aat_alt_' + id ), media.id ) ).toBe( RESP_TEXT );
+	} );
+
+	test( 'an apply refused because the alt text changed elsewhere shows why in the dialog', async ( { page } ) => {
+		const media = await openDetails( page );
+		const dialog = page.locator( 'dialog.aat-preview-dialog' );
+		await page.locator( '.aat-generate' ).click();
+		await expect( dialog.locator( '#aat-preview-text' ) ).toHaveValue( RESP_TEXT );
+		// Someone else saves a text while the preview is open.
+		await requestUtils.rest( { method: 'POST', path: `/wp/v2/media/${ media.id }`, data: { alt_text: HUMAN_TEXT } } );
+
+		const apply = dialog.locator( '.aat-preview-apply' );
+		await apply.click();
+		await expect( dialog.locator( '.aat-preview-error[role="alert"]' ) ).toHaveText( 'Alt-texten har ändrats under tiden. Inget sparades.' );
+		await expect( dialog ).toHaveCount( 1 );
+		await expect( apply ).not.toHaveAttribute( 'aria-disabled', 'true' );
+		await expect( apply ).toBeFocused();
+		expect( await altOf( media.id ) ).toBe( HUMAN_TEXT );
+		await expect( page.locator( '#attachment-details-two-column-alt-text' ) ).toHaveValue( '' );
 	} );
 
 	test( 'empty custom feedback shows an inline error', async ( { page } ) => {

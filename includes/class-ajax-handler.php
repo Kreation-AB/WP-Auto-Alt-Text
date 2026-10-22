@@ -7,6 +7,8 @@ class Auto_Alt_Text_Ajax_Handler {
     private const ERROR_MISSING_ID = 'Missing attachment ID';
     private const ERROR_INVALID_ATTACHMENT = 'Invalid attachment ID';
     private const ERROR_INSUFFICIENT_PERMISSIONS = 'Insufficient permissions';
+    /** Exception code of an apply refused because the alt text changed after the editor read it. */
+    private const ALT_CHANGED = 409;
     /**
      * Registers AJAX actions for generating alt text for attachments.
      */
@@ -90,6 +92,9 @@ class Auto_Alt_Text_Ajax_Handler {
             $original_text = sanitize_text_field(wp_unslash($_POST['original_text'] ?? ''));
             $is_edited = isset($_POST['is_edited']) && $_POST['is_edited'] === '1';
             $tokens_used = isset($_POST['tokens_used']) ? intval($_POST['tokens_used']) : 0;
+            // The alt text the media modal's field held when the editor clicked
+            // "Använd"; the block editor sends none, and then nothing is compared.
+            $expected_alt = isset($_POST['expected_alt']) ? trim(sanitize_text_field(wp_unslash($_POST['expected_alt']))) : null;
 
             if (!$attachment_id || !$alt_text) {
                 throw new Exception('Missing required parameters');
@@ -97,6 +102,12 @@ class Auto_Alt_Text_Ajax_Handler {
 
             if (!current_user_can('edit_post', $attachment_id)) {
                 throw new Exception('Permission denied');
+            }
+
+            // Someone saved another text meanwhile (typically the editor, after
+            // closing the preview): text a person wrote is never overwritten.
+            if (null !== $expected_alt && $expected_alt !== self::stored_alt($attachment_id)) {
+                throw new Exception(__('Alt-texten har ändrats under tiden. Inget sparades.', 'WP-Auto-Alt-Text'), self::ALT_CHANGED);
             }
 
             // Metadata functions unslash their input, so slash it once here.
@@ -144,7 +155,7 @@ class Auto_Alt_Text_Ajax_Handler {
             error_log('[Auto Alt Text Error] ' . $e->getMessage());
             wp_send_json_error([
                 'message' => $e->getMessage(),
-                'code' => $e->getCode()
+                'code' => self::ALT_CHANGED === $e->getCode() ? 'aat_alt_changed' : $e->getCode()
             ]);
             return;
         }
@@ -154,6 +165,16 @@ class Auto_Alt_Text_Ajax_Handler {
             'alt_text' => $alt_text,
             'attachment_id' => $attachment_id
         ]);
+    }
+
+    /**
+     * The attachment's alt text as stored now, read past the object cache, and
+     * normalised like expected_alt: the field holds the stored text exactly,
+     * and sanitize_text_field() changes some texts (a lone "<" for one).
+     */
+    private static function stored_alt(int $attachment_id): string {
+        wp_cache_delete($attachment_id, 'post_meta');
+        return trim(sanitize_text_field((string) get_post_meta($attachment_id, '_wp_attachment_image_alt', true)));
     }
 
     /**

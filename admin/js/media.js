@@ -75,9 +75,10 @@ function cacheDrop( id ) {
 
 /* ---- admin-ajax ---- */
 
-function failure( detail, session = false ) {
+function failure( detail, session = false, code = '' ) {
 	const error = new Error( detail || '' );
 	error.session = session;
+	error.code = code;
 	return error;
 }
 
@@ -116,8 +117,9 @@ async function post( params ) {
 		data = null;
 	}
 	if ( ! data || data.success !== true ) {
-		const message = data && data.data && typeof data.data.message === 'string' ? data.data.message : '';
-		throw failure( message );
+		const detail = data && data.data ? data.data : {};
+		const message = typeof detail.message === 'string' ? detail.message : '';
+		throw failure( message, false, typeof detail.code === 'string' ? detail.code : '' );
 	}
 	return data.data && typeof data.data === 'object' ? data.data : {};
 }
@@ -490,15 +492,47 @@ function clearFieldError( state, field ) {
 }
 
 /**
+ * The block that holds the attachment's own Generate button and alt field
+ * (the grid's details view, a media modal's sidebar, the attachment edit
+ * form), or null when the attachment is no longer on screen.
+ */
+function fieldScope( state ) {
+	const trigger = triggerFor( state );
+	return trigger ? trigger.closest( FIELD_SCOPES ) : null;
+}
+
+/** The attachment's wp.media model, or null on a screen without media models. */
+function mediaModel( attachmentId ) {
+	try {
+		const media = window.wp && window.wp.media;
+		return media && typeof media.attachment === 'function' ? media.attachment( attachmentId ) : null;
+	} catch ( e ) {
+		return null;
+	}
+}
+
+/**
+ * Whether the attachment's alt text still reads `before`: its field on
+ * screen or, off screen, its wp.media model (core saved a person's text
+ * into it). Anything else means a person changed it after "Använd".
+ */
+function altUnchanged( state, before ) {
+	const scope = fieldScope( state );
+	if ( scope ) {
+		return Array.prototype.every.call( scope.querySelectorAll( ALT_FIELDS ), ( field ) => field.value === before );
+	}
+	const model = mediaModel( state.attachmentId );
+	return ! model || typeof model.get !== 'function' || model.get( 'alt' ) === before;
+}
+
+/**
  * Writes the saved text into the alt field of the same attachment only: the
- * one in the block that holds its Generate button (the grid's details view,
- * a media modal's sidebar, the attachment edit form). `change` makes
- * wp.media's model take it. When the attachment is no longer on screen,
- * nothing on screen is touched; its model is updated without saving again.
+ * one in its own block (see fieldScope). `change` makes wp.media's model take
+ * it. When the attachment is no longer on screen, nothing on screen is
+ * touched; its model is updated without saving again.
  */
 function writeAltFields( state, text ) {
-	const trigger = triggerFor( state );
-	const scope = trigger ? trigger.closest( FIELD_SCOPES ) : null;
+	const scope = fieldScope( state );
 	if ( scope ) {
 		scope.querySelectorAll( ALT_FIELDS ).forEach( ( field ) => {
 			field.value = text;
@@ -506,9 +540,8 @@ function writeAltFields( state, text ) {
 		} );
 		return;
 	}
+	const model = mediaModel( state.attachmentId );
 	try {
-		const media = window.wp && window.wp.media;
-		const model = media && typeof media.attachment === 'function' ? media.attachment( state.attachmentId ) : null;
 		if ( model && typeof model.set === 'function' ) {
 			model.set( 'alt', text );
 		}
@@ -527,24 +560,39 @@ async function apply( state, origin ) {
 		return;
 	}
 	clearFieldError( state, state.textarea );
+	// What the attachment's alt field holds now. The server refuses the text if
+	// the stored alt is no longer this, and a late response writes nothing if
+	// the field changed: the editor may close the dialog and type their own.
+	const scope = fieldScope( state );
+	const field = scope ? scope.querySelector( ALT_FIELDS ) : null;
+	const before = field ? field.value : null;
+	const params = {
+		action: 'apply_alt_text',
+		attachment_id: String( state.attachmentId ),
+		alt_text: value,
+		original_text: state.baseline,
+		is_edited: value.trim() !== state.baseline.trim() ? '1' : '0',
+		nonce: cfg.nonce || '',
+	};
+	if ( null !== before ) {
+		params.expected_alt = before;
+	}
 	setDialogBusy( state, true, t.saving );
 	try {
-		const data = await post( {
-			action: 'apply_alt_text',
-			attachment_id: String( state.attachmentId ),
-			alt_text: value,
-			original_text: state.baseline,
-			is_edited: value.trim() !== state.baseline.trim() ? '1' : '0',
-			nonce: cfg.nonce || '',
-		} );
+		const data = await post( params );
 		// The applied text is no longer an unapplied AI suggestion.
 		cacheDrop( state.attachmentId );
-		writeAltFields( state, typeof data.alt_text === 'string' && data.alt_text ? data.alt_text : value );
+		// Open or closed dialog alike: a person's text in the field wins.
+		if ( null === before || altUnchanged( state, before ) ) {
+			writeAltFields( state, typeof data.alt_text === 'string' && data.alt_text ? data.alt_text : value );
+		}
 		finish( state );
 		const trigger = triggerFor( state );
 		announce( trigger ? regions( trigger ).status : null, t.saved );
 	} catch ( error ) {
-		const message = errorText( t.apply_failed, error );
+		// Refused because the alt text changed meanwhile: the server's message
+		// says nothing was saved; the AI text stays in the session cache.
+		const message = 'aat_alt_changed' === error.code && error.message ? error.message : errorText( t.apply_failed, error );
 		if ( current !== state ) {
 			const trigger = triggerFor( state );
 			announce( trigger ? regions( trigger ).error : null, message );
