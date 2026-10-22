@@ -108,4 +108,12 @@ test.describe( 'accessibility', () => {
 		await page.locator( '.aat-bulk-dismiss' ).click();
 		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
 	} );
+
+	test( 'media list with the alt-text filter and column has none', async ( { page } ) => {
+		ids.push( ( await requestUtils.uploadMedia( SAMPLE ) ).id );
+		await page.goto( '/wp-admin/upload.php?mode=list&aat_alt=missing' );
+		await expect( page.locator( '#aat-alt-filter' ) ).toBeVisible();
+		await expect( page.locator( `#post-${ ids[ 0 ] } .aat-alt-col-missing` ) ).toBeVisible();
+		await checkA11y( page, { pageName: 'media-list', include: [ '.wp-list-table', '.tablenav.top .actions' ] } );
+	} );
 } );
