@@ -124,6 +124,7 @@ class WP_Auto_Alt_Text_Plugin {
 		require_once __DIR__ . '/includes/class-library-scanner.php';
 		require_once __DIR__ . '/includes/class-library-run.php';
 		require_once __DIR__ . '/includes/class-library-runner.php';
+		require_once __DIR__ . '/includes/class-bulk.php';
 		require_once __DIR__ . '/includes/class-library-report.php';
 		require_once __DIR__ . '/includes/class-library-page.php';
 		require_once __DIR__ . '/includes/class-settings-page.php';
