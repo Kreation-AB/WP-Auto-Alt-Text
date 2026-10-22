@@ -567,6 +567,7 @@ class Auto_Alt_Text_Queue {
                 $this->finish($job, self::STATUS_SKIPPED);
                 return true;
             }
+            $policy = Auto_Alt_Text_Library_Scanner::policy_for_coverage($run['coverage']);
         } else {
             $policy = in_array($job->generation_type, self::AUTO_GENERATION_TYPES, true)
                 ? Auto_Alt_Text_Provenance::POLICY_MISSING
@@ -580,6 +581,9 @@ class Auto_Alt_Text_Queue {
 
         $processor = $this->processor ?: [$this, 'default_processor'];
         try {
+            // The write-time guard: the generator re-checks the policy and that
+            // the alt text is still what it was when the job was claimed.
+            Auto_Alt_Text_Run_Context::set_write_guard($policy, trim((string) get_post_meta($attachment_id, '_wp_attachment_image_alt', true)));
             if (null !== $run_id) {
                 Auto_Alt_Text_Run_Context::set($run_id);
             }
@@ -595,6 +599,7 @@ class Auto_Alt_Text_Queue {
             ]);
             $result = ['status' => 'retry', 'error' => $e->getMessage()];
         } finally {
+            Auto_Alt_Text_Run_Context::set_write_guard(null, null);
             if (null !== $run_id) {
                 Auto_Alt_Text_Run_Context::set(null);
             }

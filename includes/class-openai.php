@@ -302,7 +302,7 @@ class Auto_Alt_Text_OpenAI  {
         if (!$preview_mode && empty($this->run_overrides['no_cache'])) {
             $cached = Auto_Alt_Text_Cache_Manager::get_cached_response($job['cache_key']);
             if (is_string($cached) && '' !== $cached) {
-                if ($this->library_write_blocked($attachment_id)) {
+                if ($this->write_blocked($attachment_id)) {
                     return null;
                 }
                 $this->last_from_cache = true;
@@ -325,7 +325,7 @@ class Auto_Alt_Text_OpenAI  {
 
         $text = $result['text'];
         // The spend is real either way, so it is tracked; a blocked write is not "applied".
-        $blocked = !$preview_mode && $this->library_write_blocked($attachment_id);
+        $blocked = !$preview_mode && $this->write_blocked($attachment_id);
         $this->statistics->track_generation(
             $attachment_id,
             $text,
@@ -359,29 +359,26 @@ class Auto_Alt_Text_OpenAI  {
     }
 
     /**
-     * Write-time guard for library runs: text a person wrote after the job was
-     * claimed is never overwritten. Applies to run jobs only (run context set);
-     * on a block nothing is stored and the error class becomes "skipped".
+     * Write-time guard for queue jobs: text a person wrote after the job was
+     * claimed is never overwritten. Applies only while the queue has set a
+     * guard, so the synchronous paths are unchanged. On a block nothing is
+     * stored and the error class becomes "skipped".
      */
-    private function library_write_blocked(int $attachment_id): bool {
-        $run_id = Auto_Alt_Text_Run_Context::current();
-        if (null === $run_id) {
+    private function write_blocked(int $attachment_id): bool {
+        $guard = Auto_Alt_Text_Run_Context::write_guard();
+        if (null === $guard) {
             return false;
         }
-        $run = Auto_Alt_Text_Library_Run::get($run_id);
-        if (null === $run) {
-            return false;
-        }
-        $policy = Auto_Alt_Text_Library_Scanner::policy_for_coverage($run['coverage']);
         // An editor may have saved alt text in another request during the API
         // call; that never clears this request's meta cache, so read it fresh.
         wp_cache_delete($attachment_id, 'post_meta');
-        if (Auto_Alt_Text_Provenance::allows_overwrite($attachment_id, $policy)) {
+        $current = trim((string) get_post_meta($attachment_id, '_wp_attachment_image_alt', true));
+        if ($current === $guard['snapshot'] && Auto_Alt_Text_Provenance::allows_overwrite($attachment_id, $guard['policy'])) {
             return false;
         }
         $this->last_error_class = 'skipped';
-        $this->last_error = 'Alt text changed during the run; left untouched.';
-        Auto_Alt_Text_Logger::log('Library write skipped: alt text is no longer eligible', 'info', ['attachment_id' => $attachment_id]);
+        $this->last_error = 'Alt text changed during the job; left untouched.';
+        Auto_Alt_Text_Logger::log('Queue write skipped: alt text is no longer eligible', 'info', ['attachment_id' => $attachment_id]);
         return true;
     }
 

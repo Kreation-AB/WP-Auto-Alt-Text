@@ -18,4 +18,20 @@ class Auto_Alt_Text_Run_Context {
     public static function current(): ?int {
         return self::$run_id;
     }
+
+    /** @var array{policy:string,snapshot:string}|null */
+    private static $write_guard = null;
+
+    /**
+     * The write guard of the queue job being processed: the overwrite policy
+     * and the alt text as it was when the job was claimed. A null policy clears it.
+     */
+    public static function set_write_guard(?string $policy, ?string $snapshot): void {
+        self::$write_guard = null === $policy ? null : ['policy' => $policy, 'snapshot' => (string) $snapshot];
+    }
+
+    /** @return array{policy:string,snapshot:string}|null */
+    public static function write_guard(): ?array {
+        return self::$write_guard;
+    }
 }
