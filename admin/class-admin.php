@@ -50,23 +50,37 @@ class Auto_Alt_Text_Admin {
         return $bulk_actions;
     }
 
-    /** The list-mode bulk action queues the selection on the server and returns to the same list view. */
+    /**
+     * The list-mode bulk action queues the selection on the server and returns
+     * to the same list view: `aat_bulk=queued` when anything is tracked, and
+     * the files that could not be queued, per reason, in `aat_bulk_rejected`.
+     */
     public function handle_bulk_actions($redirect_to, $doaction, $post_ids) {
         if ($doaction !== 'generate_alt_text') {
             return $redirect_to;
         }
-        $url = remove_query_arg(['bulk_generate_alt_text', 'bulk_ids', 'processed', 'failed', 'aat_bulk'], $redirect_to);
+        $url = remove_query_arg(['bulk_generate_alt_text', 'bulk_ids', 'processed', 'failed', 'aat_bulk', Auto_Alt_Text_Bulk_Notice::REJECTED_PARAM], $redirect_to);
         if (!current_user_can('upload_files')) {
             return $url;
         }
         $result = Auto_Alt_Text_Bulk::request(get_current_user_id(), (array) $post_ids);
-        $flag = is_wp_error($result) ? preg_replace('/^aat_bulk_/', '', $result->get_error_code()) : 'queued';
-        return add_query_arg('aat_bulk', $flag, $url);
+        if (is_wp_error($result)) {
+            return add_query_arg('aat_bulk', preg_replace('/^aat_bulk_/', '', $result->get_error_code()), $url);
+        }
+        $rejected = array_sum($result['rejected']);
+        $args = [];
+        if ($result['queued'] + $result['already_queued'] > 0 || 0 === $rejected) {
+            $args['aat_bulk'] = 'queued';
+        }
+        if ($rejected > 0) {
+            $args[Auto_Alt_Text_Bulk_Notice::REJECTED_PARAM] = Auto_Alt_Text_Bulk_Notice::encode_rejected($result['rejected']);
+        }
+        return add_query_arg($args, $url);
     }
 
-    /** One-time flag that core drops from the address bar. */
+    /** One-time flags that core drops from the address bar. */
     public function add_removable_query_args($args) {
-        return array_merge((array) $args, ['aat_bulk']);
+        return array_merge((array) $args, ['aat_bulk', Auto_Alt_Text_Bulk_Notice::REJECTED_PARAM]);
     }
 
     /** Verifies the bulk controls' nonce and capability, runs the action and returns the URL to go back to. */

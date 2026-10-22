@@ -75,6 +75,35 @@ class Auto_Alt_Text_Bulk_Action_Test extends WP_UnitTestCase {
         $this->assertSame('no_key', $this->query($url)['aat_bulk']);
     }
 
+    public function test_bulk_action_reports_rejected_files_next_to_the_queued_ones() {
+        $author = self::factory()->user->create(['role' => 'author']);
+        wp_set_current_user($author);
+        $own = $this->image();
+        wp_update_post(['ID' => $own, 'post_author' => $author]);
+        $others = $this->image();
+        $pdf = self::factory()->attachment->create(['post_mime_type' => 'application/pdf', 'post_author' => $author]);
+        $from = admin_url('upload.php?mode=list&aat_bulk_rejected=9-9-9');
+        $args = $this->query($this->admin->handle_bulk_actions($from, 'generate_alt_text', [$own, $others, $pdf, 999999]));
+        $this->assertSame('queued', $args['aat_bulk']);
+        $this->assertSame('1-1-1', $args['aat_bulk_rejected']);
+        $this->assertSame('list', $args['mode']);
+        $this->assertNotNull(Auto_Alt_Text_Bulk::progress($author));
+    }
+
+    public function test_bulk_action_with_nothing_queued_reports_only_the_rejections() {
+        $pdf = self::factory()->attachment->create(['post_mime_type' => 'application/pdf', 'post_author' => $this->editor]);
+        $args = $this->query($this->admin->handle_bulk_actions(admin_url('upload.php'), 'generate_alt_text', [$pdf]));
+        $this->assertArrayNotHasKey('aat_bulk', $args);
+        $this->assertSame('1-0-0', $args['aat_bulk_rejected']);
+        $this->assertNull(Auto_Alt_Text_Bulk::progress($this->editor));
+    }
+
+    public function test_bulk_action_without_rejections_adds_no_rejected_arg() {
+        $args = $this->query($this->admin->handle_bulk_actions(admin_url('upload.php'), 'generate_alt_text', [$this->image()]));
+        $this->assertSame('queued', $args['aat_bulk']);
+        $this->assertArrayNotHasKey('aat_bulk_rejected', $args);
+    }
+
     public function test_other_actions_pass_through() {
         $from = admin_url('upload.php?x=1');
         $this->assertSame($from, $this->admin->handle_bulk_actions($from, 'trash', [1]));
@@ -82,6 +111,7 @@ class Auto_Alt_Text_Bulk_Action_Test extends WP_UnitTestCase {
 
     public function test_aat_bulk_is_a_removable_query_arg() {
         $this->assertContains('aat_bulk', apply_filters('removable_query_args', []));
+        $this->assertContains('aat_bulk_rejected', apply_filters('removable_query_args', []));
     }
 
     public function test_admin_post_dismiss_and_cancel_check_nonce_and_capability() {

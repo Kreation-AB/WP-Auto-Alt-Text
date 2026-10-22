@@ -6,6 +6,9 @@ if ( ! defined( 'ABSPATH' ) ) exit;
  * it works without JS; media-library.js keeps the same structure up to date.
  */
 class Auto_Alt_Text_Bulk_Notice {
+    /** List-mode redirect arg: the rejected counts, as "not_image-no_permission-not_found". */
+    public const REJECTED_PARAM = 'aat_bulk_rejected';
+    private const REJECTED_KEYS = ['not_image', 'no_permission', 'not_found'];
     private const ERROR_CODES = ['too_many', 'no_key', 'tracked_full', 'empty'];
 
     /** Prints the notice(s) on the Media Library for the current user. */
@@ -20,6 +23,14 @@ class Auto_Alt_Text_Bulk_Notice {
             printf(
                 '<div class="notice notice-error is-dismissible aat-bulk-error"><p>%s</p></div>',
                 esc_html($messages[$code])
+            );
+        }
+        $rejected = isset($_GET[self::REJECTED_PARAM]) ? sanitize_text_field(wp_unslash($_GET[self::REJECTED_PARAM])) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only counts, decoded to integers.
+        $rejected_text = self::rejected_text(self::decode_rejected($rejected));
+        if ('' !== $rejected_text) {
+            printf(
+                '<div class="notice notice-warning is-dismissible aat-bulk-rejected"><p>%s</p></div>',
+                esc_html($rejected_text)
             );
         }
         $progress = Auto_Alt_Text_Bulk::progress(get_current_user_id());
@@ -83,7 +94,59 @@ class Auto_Alt_Text_Bulk_Notice {
             'err_generic'     => __('Det gick inte att starta genereringen. Försök igen om en stund.', 'WP-Auto-Alt-Text'),
             'grid_generate'   => __('Generera alt-text för markerade', 'WP-Auto-Alt-Text'),
             'err_empty'       => __('Markera minst en bild.', 'WP-Auto-Alt-Text'),
+            /* translators: 1: number of files, 2: the reasons, separated by commas. */
+            'rejected'        => __('%1$s av de markerade filerna kunde inte köas: %2$s.', 'WP-Auto-Alt-Text'),
+            'rejected_not_image_one' => __('1 är inte en bild', 'WP-Auto-Alt-Text'),
+            /* translators: %s: number of files. */
+            'rejected_not_image_many' => __('%s är inte bilder', 'WP-Auto-Alt-Text'),
+            /* translators: %s: number of images. */
+            'rejected_no_permission' => __('%s får du inte redigera', 'WP-Auto-Alt-Text'),
+            /* translators: %s: number of files. */
+            'rejected_not_found' => __('%s finns inte längre', 'WP-Auto-Alt-Text'),
         ];
+    }
+
+    /** The rejected counts of a bulk request, compact for the list-mode redirect. */
+    public static function encode_rejected(array $rejected): string {
+        return implode('-', array_map(static function (string $key) use ($rejected): string {
+            return (string) absint($rejected[$key] ?? 0);
+        }, self::REJECTED_KEYS));
+    }
+
+    /** @return array<string,int> The counts per reason; all zero unless the value has the encoded form. */
+    public static function decode_rejected(string $value): array {
+        $parts = 1 === preg_match('/^\d{1,5}-\d{1,5}-\d{1,5}$/', $value) ? explode('-', $value) : [];
+        $counts = [];
+        foreach (self::REJECTED_KEYS as $i => $key) {
+            $counts[$key] = min(Auto_Alt_Text_Bulk::MAX_PER_REQUEST, absint($parts[$i] ?? 0));
+        }
+        return $counts;
+    }
+
+    /**
+     * "3 av de markerade filerna kunde inte köas: 2 är inte bilder, 1 får du
+     * inte redigera." with only the reasons that occurred; '' when none did.
+     * media-library.js builds the same text from a grid request's response.
+     */
+    public static function rejected_text(array $rejected): string {
+        $s = self::strings();
+        $not_image = (int) ($rejected['not_image'] ?? 0);
+        $no_permission = (int) ($rejected['no_permission'] ?? 0);
+        $not_found = (int) ($rejected['not_found'] ?? 0);
+        $parts = [];
+        if ($not_image > 0) {
+            $parts[] = 1 === $not_image ? $s['rejected_not_image_one'] : sprintf($s['rejected_not_image_many'], self::num($not_image));
+        }
+        if ($no_permission > 0) {
+            $parts[] = sprintf($s['rejected_no_permission'], self::num($no_permission));
+        }
+        if ($not_found > 0) {
+            $parts[] = sprintf($s['rejected_not_found'], self::num($not_found));
+        }
+        if (empty($parts)) {
+            return '';
+        }
+        return sprintf($s['rejected'], self::num($not_image + $no_permission + $not_found), implode(', ', $parts));
     }
 
     /** Admin-post links and target pages, shared with JS for notices it builds itself. */

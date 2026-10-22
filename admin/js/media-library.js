@@ -95,6 +95,25 @@ function summaryText(p) {
 	return p.stalled ? text : text + ' ' + t.leave;
 }
 
+/** Same text as Auto_Alt_Text_Bulk_Notice::rejected_text(); '' when nothing was rejected. */
+function rejectedText(rejected) {
+	const r = rejected && typeof rejected === 'object' ? rejected : {};
+	const notImage = Number(r.not_image) || 0;
+	const noPermission = Number(r.no_permission) || 0;
+	const notFound = Number(r.not_found) || 0;
+	const parts = [];
+	if (notImage > 0) {
+		parts.push(notImage === 1 ? t.rejected_not_image_one : sprintf(t.rejected_not_image_many, fmtInt(notImage)));
+	}
+	if (noPermission > 0) {
+		parts.push(sprintf(t.rejected_no_permission, fmtInt(noPermission)));
+	}
+	if (notFound > 0) {
+		parts.push(sprintf(t.rejected_not_found, fmtInt(notFound)));
+	}
+	return parts.length ? sprintf(t.rejected, fmtInt(notImage + noPermission + notFound), parts.join(', ')) : '';
+}
+
 function noticeClass(p) {
 	if (p.state === 'finished') {
 		return Number(p.failed) > 0 ? 'notice-warning' : 'notice-success';
@@ -429,10 +448,23 @@ function gridImageIds(selection) {
 }
 
 function clearGridError() {
-	const old = document.getElementById('aat-grid-error');
-	if (old) {
-		old.remove();
-	}
+	['aat-grid-error', 'aat-grid-rejected'].forEach((id) => {
+		const old = document.getElementById(id);
+		if (old) {
+			old.remove();
+		}
+	});
+}
+
+/** The files a grid request could not queue: a warning, announced politely. */
+function showGridRejected(message) {
+	const notice = el('div', 'notice notice-warning aat-bulk-rejected', 'aat-grid-rejected');
+	const paragraph = el('p');
+	paragraph.setAttribute('role', 'status');
+	notice.appendChild(paragraph);
+	placeNotice(notice);
+	// Set a moment after insertion, so the new live region is announced.
+	window.setTimeout(() => setText(paragraph, message), 100);
 }
 
 function showGridError(message) {
@@ -497,12 +529,18 @@ function attachGridButton(frame) {
 		const mine = ++seq;
 		window.clearTimeout(timer);
 		try {
-			const response = await api('POST', '', { attachment_ids: ids });
+			const response = (await api('POST', '', { attachment_ids: ids })) || {};
 			if (mine === seq) {
-				if (response && response.bulk) {
+				const tracked = (Number(response.queued) || 0) + (Number(response.already_queued) || 0);
+				const rejected = rejectedText(response.rejected);
+				// Nothing queued: an earlier bulk in the response is not this click's result.
+				if (tracked > 0 && response.bulk) {
 					apply(response.bulk);
-				} else {
+				} else if (!rejected) {
 					showGridError(t.err_generic);
+				}
+				if (rejected) {
+					showGridRejected(rejected);
 				}
 			}
 		} catch (error) {

@@ -16,7 +16,7 @@ class Auto_Alt_Text_Bulk_Notice_Test extends WP_UnitTestCase {
     }
 
     public function tearDown(): void {
-        unset($_GET['aat_bulk']);
+        unset($_GET['aat_bulk'], $_GET['aat_bulk_rejected']);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);
         delete_option('auto_alt_text_api_key');
         set_current_screen('dashboard');
@@ -154,6 +154,41 @@ class Auto_Alt_Text_Bulk_Notice_Test extends WP_UnitTestCase {
         $this->assertSame('', $this->render());
         $_GET['aat_bulk'] = 'bogus';
         $this->assertSame('', $this->render());
+    }
+
+    public function test_rejected_counts_render_a_warning_with_the_reasons_that_occurred() {
+        $_GET['aat_bulk_rejected'] = '2-1-0';
+        $html = $this->render();
+        $this->assertStringContainsString('notice-warning', $html);
+        $this->assertStringContainsString('aat-bulk-rejected', $html);
+        $this->assertStringContainsString('3 av de markerade filerna kunde inte köas: 2 är inte bilder, 1 får du inte redigera.', $html);
+        $this->assertStringNotContainsString('finns inte längre', $html);
+        $this->assertStringNotContainsString('id="aat-bulk-notice"', $html);
+
+        $_GET['aat_bulk_rejected'] = '1-0-3';
+        $this->assertStringContainsString('4 av de markerade filerna kunde inte köas: 1 är inte en bild, 3 finns inte längre.', $this->render());
+
+        foreach (['0-0-0', 'x', '', '-5-a'] as $junk) {
+            $_GET['aat_bulk_rejected'] = $junk;
+            $this->assertStringNotContainsString('aat-bulk-rejected', $this->render(), $junk);
+        }
+    }
+
+    public function test_rejected_warning_renders_next_to_the_progress_notice() {
+        $this->queue(1);
+        $_GET['aat_bulk_rejected'] = '0-2-0';
+        $html = $this->render();
+        $this->assertStringContainsString('2 av de markerade filerna kunde inte köas: 2 får du inte redigera.', $html);
+        $this->assertStringContainsString('id="aat-bulk-notice"', $html);
+        $this->assertLessThan(strpos($html, 'id="aat-bulk-notice"'), strpos($html, 'aat-bulk-rejected'));
+    }
+
+    public function test_rejected_counts_round_trip_and_are_capped() {
+        $encoded = Auto_Alt_Text_Bulk_Notice::encode_rejected(['not_image' => 3, 'no_permission' => 0, 'not_found' => 1]);
+        $this->assertSame('3-0-1', $encoded);
+        $this->assertSame(['not_image' => 3, 'no_permission' => 0, 'not_found' => 1], Auto_Alt_Text_Bulk_Notice::decode_rejected($encoded));
+        $this->assertSame(Auto_Alt_Text_Bulk::MAX_PER_REQUEST, Auto_Alt_Text_Bulk_Notice::decode_rejected('99999-0-0')['not_image']);
+        $this->assertSame('', Auto_Alt_Text_Bulk_Notice::rejected_text(['not_image' => 0, 'no_permission' => 0, 'not_found' => 0]));
     }
 
     public function test_titles_are_escaped() {

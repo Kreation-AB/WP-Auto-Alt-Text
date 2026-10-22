@@ -99,6 +99,34 @@ test.describe( 'bulk generation', () => {
 		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
 	} );
 
+	test( 'list mode reports the files it could not queue', async ( { page } ) => {
+		const note = await requestUtils.uploadMedia( { name: 'anteckning.txt', mimeType: 'text/plain', buffer: Buffer.from( 'Ingen bild.' ) } );
+		ids.push( note.id );
+		ids.push( ( await requestUtils.uploadMedia( SAMPLE ) ).id );
+		const rejected = page.locator( '.aat-bulk-rejected' );
+		const runBulk = async ( selected ) => {
+			await page.goto( '/wp-admin/upload.php?mode=list' );
+			for ( const id of selected ) {
+				await page.locator( `#cb-select-${ id }` ).check();
+			}
+			await page.locator( '#bulk-action-selector-top' ).selectOption( 'generate_alt_text' );
+			await page.locator( '#doaction' ).click();
+		};
+
+		// Only a non-image: the warning alone, nothing tracked.
+		await runBulk( [ note.id ] );
+		await expect( rejected ).toHaveClass( /notice-warning/ );
+		await expect( rejected.locator( 'p' ) ).toHaveText( '1 av de markerade filerna kunde inte köas: 1 är inte en bild.' );
+		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
+
+		// With an image too: the warning next to the progress notice.
+		await runBulk( ids );
+		await expect( rejected.locator( 'p' ) ).toHaveText( '1 av de markerade filerna kunde inte köas: 1 är inte en bild.' );
+		await expect( page.locator( '#aat-bulk-summary' ) ).toContainText( 'Alt-text genereras i bakgrunden: 0 av 1 bilder klara.' );
+		// Core drops the one-time args from the address bar.
+		await expect( page ).not.toHaveURL( /aat_bulk_rejected/ );
+	} );
+
 	test( 'cancel stops pending images', async ( { page } ) => {
 		await queueThree( page );
 		await page.locator( '.aat-bulk-cancel' ).click();
@@ -192,5 +220,37 @@ test.describe( 'bulk generation', () => {
 		await expect( page.locator( '#aat-grid-error' ) ).toContainText( 'Ange en API-nyckel för test.' );
 		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
 		await expect( page.locator( 'button.aat-grid-generate' ) ).toBeEnabled();
+	} );
+
+	test( 'grid bulk button reports images it could not queue', async ( { page } ) => {
+		ids.push( ( await requestUtils.uploadMedia( SAMPLE ) ).id );
+		ids.push( ( await requestUtils.uploadMedia( SAMPLE ) ).id );
+		// As for an Author who selected other people's images: nothing queued, so no notice for an earlier bulk either.
+		await page.route( '**/wp-auto-alt-text/v1/bulk', ( route ) => {
+			if ( route.request().method() !== 'POST' ) {
+				return route.continue();
+			}
+			return route.fulfill( {
+				status: 202,
+				contentType: 'application/json',
+				body: JSON.stringify( {
+					queued: 0,
+					already_queued: 0,
+					rejected: { not_image: 0, no_permission: 2, not_found: 0 },
+					bulk: { state: 'finished', stalled: false, total: 1, written: 1, skipped: 0, cancelled: 0, removed: 0, failed: 0, pending: 0, retrying: 0, failures: [] },
+				} ),
+			} );
+		} );
+		await page.goto( '/wp-admin/upload.php?mode=grid' );
+		await page.locator( '.select-mode-toggle-button' ).click();
+		for ( const id of ids ) {
+			await page.locator( `.attachment[data-id="${ id }"]` ).click();
+		}
+		await page.locator( 'button.aat-grid-generate' ).click();
+		const rejected = page.locator( '#aat-grid-rejected' );
+		await expect( rejected ).toHaveClass( /notice-warning/ );
+		await expect( rejected.locator( '[role="status"]' ) ).toHaveText( '2 av de markerade filerna kunde inte köas: 2 får du inte redigera.' );
+		await expect( page.locator( '#aat-grid-error' ) ).toHaveCount( 0 );
+		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
 	} );
 } );
