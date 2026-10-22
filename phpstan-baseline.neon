@@ -7,12 +7,6 @@ parameters:
 			path: admin/class-admin.php
 
 		-
-			message: '#^Call to function method_exists\(\) with WP_Screen and ''is_block_editor'' will always evaluate to true\.$#'
-			identifier: function.alreadyNarrowedType
-			count: 1
-			path: admin/class-admin.php
-
-		-
 			message: '#^Static method Auto_Alt_Text_Activator\:\:column_exists\(\) is unused\.$#'
 			identifier: method.unused
 			count: 1

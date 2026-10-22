@@ -14,11 +14,15 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
         wp_deregister_script('auto-alt-text-media-library');
         wp_dequeue_script('auto-alt-text-media');
         wp_deregister_script('auto-alt-text-media');
-        wp_dequeue_script('auto-alt-text-admin-js');
+        // Inline data accumulates on the registered handle; start each test clean.
+        wp_dequeue_script('aat-block-editor');
+        wp_deregister_script('aat-block-editor');
         wp_dequeue_style('auto_alt_text_css');
-        // Localized data accumulates on the registered handle; start each test clean.
-        wp_deregister_script('auto-alt-text-admin-js');
         wp_deregister_style('auto_alt_text_css');
+        delete_option('wpai_features_enabled');
+        delete_option('wpai_feature_alt-text-generation_enabled');
+        remove_filter('aat_ai_plugin_loaded', '__return_true');
+        wp_set_current_user(0);
         parent::tearDown();
     }
 
@@ -33,39 +37,144 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
 
     public function test_dashboard_does_not_enqueue_plugin_assets() {
         do_action('admin_enqueue_scripts', 'index.php');
-        $this->assertFalse(wp_script_is('auto-alt-text-admin-js', 'enqueued'));
+        $this->assertFalse(wp_script_is('auto-alt-text-media', 'enqueued'));
         $this->assertFalse(wp_style_is('auto_alt_text_css', 'enqueued'));
     }
 
     public function test_media_library_enqueues_versioned_assets() {
         do_action('admin_enqueue_scripts', 'upload.php');
-        $this->assertTrue(wp_script_is('auto-alt-text-admin-js', 'enqueued'));
-        $this->assertSame(AUTO_ALT_TEXT_VERSION, wp_scripts()->registered['auto-alt-text-admin-js']->ver);
-    }
-
-    public function test_media_modal_on_other_admin_screens_enqueues_assets() {
-        // attachment_fields_to_edit renders the Generate button in every wp.media
-        // modal, e.g. the site editor, widgets and customizer.
-        set_current_screen('site-editor');
-        do_action('wp_enqueue_media');
-        $this->assertTrue(wp_script_is('auto-alt-text-admin-js', 'enqueued'));
         $this->assertTrue(wp_style_is('auto_alt_text_css', 'enqueued'));
-        $this->assertStringContainsString('autoAltTextData', (string) wp_scripts()->get_data('auto-alt-text-admin-js', 'data'));
-    }
-
-    public function test_media_modal_assets_are_localized_once_when_both_hooks_fire() {
-        // upload.php and the editors call wp_enqueue_media() and then fire admin_enqueue_scripts.
-        set_current_screen('upload');
-        do_action('wp_enqueue_media');
-        do_action('admin_enqueue_scripts', 'upload.php');
-        $this->assertSame(1, substr_count((string) wp_scripts()->get_data('auto-alt-text-admin-js', 'data'), 'var autoAltTextData'));
+        $this->assertSame(AUTO_ALT_TEXT_VERSION, wp_styles()->registered['auto_alt_text_css']->ver);
     }
 
     public function test_media_modal_outside_admin_enqueues_nothing() {
         set_current_screen('front');
         do_action('wp_enqueue_media');
-        $this->assertFalse(wp_script_is('auto-alt-text-admin-js', 'enqueued'));
+        $this->assertFalse(wp_script_is('auto-alt-text-media', 'enqueued'));
         $this->assertFalse(wp_style_is('auto_alt_text_css', 'enqueued'));
+    }
+
+    public function test_style_css_still_loads_on_plugin_pages_and_media_screens() {
+        // [screen, hook suffix]: the media screens and the plugin's own pages (spec §5.6).
+        $screens = [
+            ['upload', 'upload.php'],
+            ['post', 'post.php'],
+            ['post', 'post-new.php'],
+            ['attachment', 'post.php'],
+            ['toplevel_page_auto-alt-text', 'toplevel_page_auto-alt-text'],
+            ['auto-alt-text_page_auto-alt-text-library', 'auto-alt-text_page_auto-alt-text-library'],
+            ['auto-alt-text_page_auto-alt-text-stats', 'auto-alt-text_page_auto-alt-text-stats'],
+        ];
+        foreach ($screens as [$screen, $hook]) {
+            wp_dequeue_style('auto_alt_text_css');
+            set_current_screen($screen);
+            do_action('admin_enqueue_scripts', $hook);
+            $this->assertTrue(wp_style_is('auto_alt_text_css', 'enqueued'), $screen . ' / ' . $hook);
+        }
+
+        // Any other admin screen that opens a media frame (site editor, widgets, customizer).
+        wp_dequeue_style('auto_alt_text_css');
+        set_current_screen('site-editor');
+        do_action('wp_enqueue_media');
+        $this->assertTrue(wp_style_is('auto_alt_text_css', 'enqueued'), 'wp_enqueue_media');
+
+        wp_dequeue_style('auto_alt_text_css');
+        set_current_screen('dashboard');
+        do_action('admin_enqueue_scripts', 'index.php');
+        $this->assertFalse(wp_style_is('auto_alt_text_css', 'enqueued'), 'index.php');
+    }
+
+    /** The before-inline config of the block editor script, decoded. */
+    private function block_editor_config(): array {
+        $before = implode("\n", array_filter((array) wp_scripts()->get_data('aat-block-editor', 'before')));
+        $this->assertSame(1, preg_match('/^var aatBlockEditor = (\{.*\});$/s', $before, $m), $before);
+        $cfg = json_decode($m[1], true);
+        $this->assertIsArray($cfg);
+        return $cfg;
+    }
+
+    public function test_block_editor_script_is_classic_with_its_deps_on_enqueue_block_editor_assets() {
+        wp_set_current_user(self::factory()->user->create(['role' => 'author']));
+
+        // The post screen alone does not load it: only editors that fire enqueue_block_editor_assets.
+        set_current_screen('post');
+        do_action('admin_enqueue_scripts', 'post.php');
+        $this->assertFalse(wp_script_is('aat-block-editor', 'registered'));
+
+        do_action('enqueue_block_editor_assets');
+        do_action('enqueue_block_editor_assets');
+        $this->assertTrue(wp_script_is('aat-block-editor', 'enqueued'));
+        $script = wp_scripts()->registered['aat-block-editor'];
+        $this->assertStringEndsWith('/admin/js/block-editor.js', $script->src);
+        $this->assertSame(AUTO_ALT_TEXT_VERSION, $script->ver);
+        $this->assertSame(['wp-hooks', 'wp-compose', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-data', 'wp-notices'], $script->deps);
+        $this->assertSame(1, wp_scripts()->get_data('aat-block-editor', 'group'), 'In the footer, after its deps');
+
+        // A classic script: not a module handle, and its tag is left alone.
+        $this->assertNotContains('aat-block-editor', Auto_Alt_Text_Admin::MODULE_HANDLES);
+        $this->assertFalse(wp_scripts()->get_data('aat-block-editor', 'type'));
+        $tag = "<script id='aat-block-editor-js-before'>\nvar aatBlockEditor = {};\n</script>\n<script src='b.js' id='aat-block-editor-js'></script>\n";
+        $this->assertSame($tag, apply_filters('script_loader_tag', $tag, 'aat-block-editor', 'b.js'));
+
+        // The config is JSON, printed once although the hook fired twice.
+        $this->assertSame(1, substr_count(implode("\n", (array) wp_scripts()->get_data('aat-block-editor', 'before')), 'var aatBlockEditor'));
+        $cfg = $this->block_editor_config();
+        $this->assertSame(['ajaxUrl', 'nonce', 'i18n'], array_keys($cfg));
+        $this->assertSame(admin_url('admin-ajax.php'), $cfg['ajaxUrl']);
+        $this->assertSame(1, wp_verify_nonce($cfg['nonce'], 'auto_alt_text_nonce') ? 1 : 0);
+        $this->assertSame(Auto_Alt_Text_Admin::block_editor_strings(), $cfg['i18n']);
+        $this->assertSame('Alt-text med AI', $cfg['i18n']['panel']);
+        $this->assertSame('Generera alt-text', $cfg['i18n']['generate']);
+        $this->assertSame('Förhandsgranska alt-text', $cfg['i18n']['title']);
+        $this->assertSame('Alt-text', $cfg['i18n']['text_label']);
+        $this->assertSame('Använd', $cfg['i18n']['apply']);
+        $this->assertSame('Avbryt', $cfg['i18n']['cancel']);
+        $this->assertSame('Alt-texten är sparad på bilden i mediebiblioteket och i blocket.', $cfg['i18n']['saved']);
+    }
+
+    public function test_block_editor_panel_title_names_the_plugin_next_to_the_ai_plugin() {
+        add_filter('aat_ai_plugin_loaded', '__return_true');
+        update_option('wpai_features_enabled', 1);
+        update_option('wpai_feature_alt-text-generation_enabled', 1);
+        $strings = Auto_Alt_Text_Admin::block_editor_strings();
+        $this->assertSame('Alt-text med AI (WP Auto Alt Text)', $strings['panel']);
+        $this->assertSame('Generera alt-text', $strings['generate'], 'The panel title already says whose button it is');
+    }
+
+    public function test_block_editor_script_needs_upload_files() {
+        // The AJAX endpoints refuse users without upload_files, so the panel would only fail.
+        wp_set_current_user(self::factory()->user->create(['role' => 'contributor']));
+        do_action('enqueue_block_editor_assets');
+        $this->assertFalse(wp_script_is('aat-block-editor', 'registered'));
+    }
+
+    public function test_app_js_handle_is_gone() {
+        wp_set_current_user(self::factory()->user->create(['role' => 'editor']));
+        // Every screen and hook that loaded the old admin script.
+        set_current_screen('upload');
+        do_action('wp_enqueue_media');
+        do_action('admin_enqueue_scripts', 'upload.php');
+        set_current_screen('post');
+        do_action('wp_enqueue_media');
+        do_action('admin_enqueue_scripts', 'post-new.php');
+        do_action('enqueue_block_editor_assets');
+        set_current_screen('toplevel_page_auto-alt-text');
+        do_action('admin_enqueue_scripts', 'toplevel_page_auto-alt-text');
+
+        // The plugin's registered scripts are the rebuilt ones only.
+        $admin_url = plugin_dir_url(dirname(__DIR__) . '/admin/class-admin.php');
+        $ours = [];
+        foreach (wp_scripts()->registered as $handle => $script) {
+            if (is_string($script->src) && 0 === strpos($script->src, $admin_url)) {
+                $ours[] = $handle;
+            }
+        }
+        $this->assertContains('aat-block-editor', $ours);
+        $this->assertSame([], array_values(array_diff($ours, ['auto-alt-text-media-library', 'auto-alt-text-media', 'aat-block-editor', 'auto-alt-text-settings', 'auto-alt-text-library'])));
+
+        // admin/js holds only those scripts.
+        $files = array_map('basename', (array) glob(dirname(__DIR__) . '/admin/js/*.js'));
+        $this->assertSame([], array_values(array_diff($files, ['block-editor.js', 'library.js', 'media-library.js', 'media.js', 'settings.js'])), 'admin/js holds only the scripts the plugin enqueues');
     }
 
     public function test_settings_page_loads_the_tabs_script_as_a_module_with_its_labels() {
@@ -141,8 +250,7 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
     private function reset_media_handle(): void {
         wp_dequeue_script('auto-alt-text-media');
         wp_deregister_script('auto-alt-text-media');
-        wp_dequeue_script('auto-alt-text-admin-js');
-        wp_deregister_script('auto-alt-text-admin-js');
+        wp_dequeue_style('auto_alt_text_css');
     }
 
     /** The aatMedia config the page gets, decoded from the 'before' inline script. */
@@ -191,7 +299,7 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
         set_current_screen('post');
         do_action('admin_enqueue_scripts', 'post.php');
         $this->assertFalse(wp_script_is('auto-alt-text-media', 'enqueued'));
-        $this->assertTrue(wp_script_is('auto-alt-text-admin-js', 'enqueued'), 'app.js keeps loading where it did');
+        $this->assertTrue(wp_style_is('auto_alt_text_css', 'enqueued'), 'style.css keeps loading there');
 
         // Nor does the front end.
         $this->reset_media_handle();

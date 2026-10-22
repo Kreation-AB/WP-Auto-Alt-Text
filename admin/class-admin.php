@@ -1,12 +1,12 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
 class Auto_Alt_Text_Admin {
-    private const SCRIPT_HANDLE = 'auto-alt-text-admin-js';
-    private const SCRIPT_PATH = 'js/app.js';
     private const STYLE_HANDLE = 'auto_alt_text_css';
 
     private const MEDIA_LIBRARY_HANDLE = 'auto-alt-text-media-library';
     private const MEDIA_HANDLE = 'auto-alt-text-media';
+    private const BLOCK_EDITOR_HANDLE = 'aat-block-editor';
+    private const BLOCK_EDITOR_DEPS = ['wp-hooks', 'wp-compose', 'wp-element', 'wp-block-editor', 'wp-components', 'wp-data', 'wp-notices'];
 
     /** Script handles loaded as ES modules by module_tag(). */
     public const MODULE_HANDLES = [self::MEDIA_LIBRARY_HANDLE, self::MEDIA_HANDLE];
@@ -36,6 +36,7 @@ class Auto_Alt_Text_Admin {
         // The Generate button is rendered in every wp.media modal (site editor,
         // widgets, customizer, term screens...), not only on MEDIA_SCREENS.
         add_action('wp_enqueue_media', [$this, 'enqueue_media_modal_assets']);
+        add_action('enqueue_block_editor_assets', [$this, 'enqueue_block_editor_script']);
     }
 
     /**
@@ -94,14 +95,15 @@ class Auto_Alt_Text_Admin {
     }
 
     /**
-     * admin_enqueue_scripts callback: loads the plugin's admin script and
-     * styles on the media screens and the plugin's own pages.
+     * admin_enqueue_scripts callback: the admin stylesheet on the media
+     * screens and the plugin's own pages, and the media scripts where the
+     * attachment fields appear.
      */
     public function enqueueAutoAltTextScript($hook_suffix = ''): void {
         if (!self::should_load_on($hook_suffix)) {
             return;
         }
-        $this->enqueue_assets();
+        $this->enqueue_style();
         if ('upload.php' === (string) $hook_suffix) {
             $this->enqueue_media_library_module();
             $this->enqueue_media_module();
@@ -223,75 +225,71 @@ class Auto_Alt_Text_Admin {
 
     /**
      * wp_enqueue_media callback: any admin screen that opens a media modal
-     * gets media.js, which drives the modal's Generate button, and app.js.
-     * app.js's own body.upload-php check keeps the batch UI off those screens.
+     * gets the stylesheet and media.js, which drives the modal's Generate button.
      */
     public function enqueue_media_modal_assets(): void {
         if (!is_admin()) {
             return;
         }
-        $this->enqueue_assets();
+        $this->enqueue_style();
         $this->enqueue_media_module();
     }
 
     /**
-     * Enqueues the admin stylesheet and app.js (the block editor panel and
-     * the bulk loops), localized with the AJAX URL and nonces. Media screens
-     * reach this from both wp_enqueue_media and admin_enqueue_scripts; the
-     * guard keeps the localized data from being printed twice.
+     * The admin stylesheet: the plugin's own pages (library, statistics, logs,
+     * status) and the media screens depend on it.
      */
-    private function enqueue_assets(): void {
-        if (wp_script_is(self::SCRIPT_HANDLE, 'enqueued')) {
-            return;
-        }
-
+    private function enqueue_style(): void {
         wp_enqueue_style(
             self::STYLE_HANDLE,
             plugin_dir_url(dirname(__FILE__)) . 'css/style.css',
             [],
             AUTO_ALT_TEXT_VERSION
         );
-
-        $scriptUrl = plugin_dir_url(__FILE__) . self::SCRIPT_PATH;
-        $dependencies = [];
-
-        if ($this->is_block_editor_screen()) {
-            $dependencies = [
-                'wp-block-editor',
-                'wp-components',
-                'wp-element',
-                'wp-hooks',
-            ];
-        }
-
-        wp_enqueue_script(
-            self::SCRIPT_HANDLE,
-            $scriptUrl,
-            $dependencies,
-            AUTO_ALT_TEXT_VERSION,
-            true
-        );
-
-        wp_script_add_data(self::SCRIPT_HANDLE, 'type', 'module');
-
-        wp_localize_script(self::SCRIPT_HANDLE, 'autoAltTextData', [
-            'ajaxurl' => admin_url('admin-ajax.php'),
-			'actionNonce' => wp_create_nonce('auto_alt_text_nonce'),
-        ]);
     }
 
     /**
-     * Checks whether the current admin screen is using the block editor.
-     *
-     * @return bool True when the current screen is the block editor.
+     * enqueue_block_editor_assets callback: the Image block's preview-first
+     * panel (admin/js/block-editor.js) with its JSON config. It is a classic
+     * script, so its editor.BlockEdit filter is in place before the editor
+     * initialises. Users without upload_files get nothing: the AJAX
+     * endpoints would refuse them.
      */
-    private function is_block_editor_screen(): bool {
-        if (!function_exists('get_current_screen')) {
-            return false;
+    public function enqueue_block_editor_script(): void {
+        if (wp_script_is(self::BLOCK_EDITOR_HANDLE, 'enqueued') || !current_user_can('upload_files')) {
+            return;
         }
+        wp_enqueue_script(
+            self::BLOCK_EDITOR_HANDLE,
+            plugin_dir_url(__FILE__) . 'js/block-editor.js',
+            self::BLOCK_EDITOR_DEPS,
+            AUTO_ALT_TEXT_VERSION,
+            true
+        );
+        $config = [
+            'ajaxUrl' => admin_url('admin-ajax.php'),
+            'nonce'   => wp_create_nonce('auto_alt_text_nonce'),
+            'i18n'    => self::block_editor_strings(),
+        ];
+        wp_add_inline_script(self::BLOCK_EDITOR_HANDLE, 'var aatBlockEditor = ' . wp_json_encode($config) . ';', 'before');
+    }
 
-        $screen = get_current_screen();
-
-        return $screen && method_exists($screen, 'is_block_editor') && $screen->is_block_editor();
+    /** Every string block-editor.js shows. */
+    public static function block_editor_strings(): array {
+        return [
+            'panel'           => Auto_Alt_Text_Coexistence::label(__('Alt-text med AI', 'WP-Auto-Alt-Text')),
+            'generate'        => __('Generera alt-text', 'WP-Auto-Alt-Text'),
+            'title'           => __('Förhandsgranska alt-text', 'WP-Auto-Alt-Text'),
+            'text_label'      => __('Alt-text', 'WP-Auto-Alt-Text'),
+            'generating'      => __('Genererar alt-text …', 'WP-Auto-Alt-Text'),
+            'apply'           => __('Använd', 'WP-Auto-Alt-Text'),
+            'cancel'          => __('Avbryt', 'WP-Auto-Alt-Text'),
+            'saving'          => __('Sparar alt-texten …', 'WP-Auto-Alt-Text'),
+            'saved'           => __('Alt-texten är sparad på bilden i mediebiblioteket och i blocket.', 'WP-Auto-Alt-Text'),
+            'empty_text'      => __('Skriv en alt-text, eller välj Avbryt.', 'WP-Auto-Alt-Text'),
+            'generate_failed' => __('Det gick inte att generera alt-text.', 'WP-Auto-Alt-Text'),
+            'apply_failed'    => __('Det gick inte att spara alt-texten.', 'WP-Auto-Alt-Text'),
+            'session_expired' => __('Sessionen har gått ut. Ladda om sidan och försök igen.', 'WP-Auto-Alt-Text'),
+        ];
     }
 }

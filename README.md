@@ -261,7 +261,7 @@ composer check           # PHP lint, PHPCS, PHPStan and PHPUnit; needs no Node o
 composer test:coverage   # coverage to build/coverage/ (needs pcov or Xdebug)
 ```
 
-Single steps: `composer lint:php`, `composer lint` (PHPCS), `composer analyse` (PHPStan), `composer test`, and `npm run lint:js` (syntax check of `admin/js/app.js`; needs Node).
+Single steps: `composer lint:php`, `composer lint` (PHPCS), `composer analyse` (PHPStan), `composer test`, and `npm run lint:js` (syntax check of every script in `admin/js/`; needs Node).
 
 ### End-to-end tests
 
