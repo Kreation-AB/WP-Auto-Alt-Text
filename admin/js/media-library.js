@@ -551,9 +551,11 @@ function initGrid() {
 /**
  * Adds "Saknar alt-text" to the grid's type dropdown. Core picks the selected
  * option as the first filter whose props all match the collection, so every
- * core filter gets the custom prop set to null. Only the grid on upload.php is
- * touched: editor media modals have no grid mode. Extends AttachmentFilters.All
- * only (other plugins' subclasses are left alone).
+ * core filter gets the custom prop set to null. Like core's options, ours sets
+ * every prop they set, so an earlier choice ("Mina", "Ej kopplade", "Ljud")
+ * does not linger. Only the grid on upload.php is touched: editor media
+ * modals have no grid mode. Extends AttachmentFilters.All only (other
+ * plugins' subclasses are left alone).
  */
 function extendGridFilter() {
 	const gf = cfg.gridFilter;
@@ -580,7 +582,15 @@ function extendGridFilter() {
 				});
 				this.filters.aat_missing = {
 					text: gf.label,
-					props: { [gf.param]: gf.value },
+					props: {
+						status: null,
+						type: 'image',
+						uploadedTo: null,
+						orderby: 'date',
+						order: 'DESC',
+						author: null,
+						[gf.param]: gf.value,
+					},
 					priority: 60,
 				};
 			}

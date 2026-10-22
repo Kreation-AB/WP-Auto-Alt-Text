@@ -120,6 +120,32 @@ test.describe( 'alt-text view in list mode', () => {
 		await expect( item( ids[ 2 ] ) ).toHaveCount( 0 );
 	} );
 
+	test( 'grid filter resets the other filters\' choices', async ( { page } ) => {
+		await page.goto( '/wp-admin/upload.php?mode=grid' );
+		const item = ( id ) => page.locator( `.attachment[data-id="${ id }"]` );
+		await expect( item( ids[ 0 ] ) ).toBeVisible();
+		const type = page.locator( '#media-attachment-filters' );
+		const props = () => page.evaluate( () => {
+			const json = window.wp.media.frame.state().get( 'library' ).props.toJSON();
+			return { type: json.type, author: json.author, uploadedTo: json.uploadedTo, aat: json.aat_alt };
+		} );
+		// "Ljud", "Mina" and "Ej kopplade" set the type, the author and the parent: all are reset.
+		for ( const earlier of [ 'audio', 'mine', 'unattached' ] ) {
+			await type.selectOption( earlier );
+			await type.selectOption( { label: 'Saknar alt-text' } );
+			await expect( type ).toHaveValue( 'aat_missing' );
+			expect( await props(), earlier ).toEqual( { type: 'image', author: null, uploadedTo: null, aat: 'missing' } );
+			await expect( item( ids[ 0 ] ) ).toBeVisible();
+			await expect( item( ids[ 1 ] ) ).toHaveCount( 0 );
+			await expect( item( ids[ 2 ] ) ).toHaveCount( 0 );
+		}
+
+		// "Alla mediaobjekt" clears it again.
+		await type.selectOption( 'all' );
+		expect( ( await props() ).aat ).toBeNull();
+		await expect( item( ids[ 2 ] ) ).toBeVisible();
+	} );
+
 	test( 'grid filter combines with the date filter and resets', async ( { page } ) => {
 		await page.goto( '/wp-admin/upload.php?mode=grid' );
 		const item = ( id ) => page.locator( `.attachment[data-id="${ id }"]` );
