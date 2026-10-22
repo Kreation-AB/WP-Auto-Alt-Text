@@ -88,10 +88,12 @@ function summaryText(p) {
 		}
 		return parts.join(' ');
 	}
+	const done = fmtInt(Math.max(0, (Number(p.total) || 0) - (Number(p.pending) || 0)));
 	if (String(p.state).indexOf('paused_') === 0) {
-		return t[p.state] || t.paused_auth;
+		// The count is the progress bar's text equivalent.
+		return (t[p.state] || t.paused_auth) + ' ' + sprintf(t.paused_count, done, fmtInt(p.total));
 	}
-	const text = sprintf(t.running, fmtInt(p.total - p.pending), fmtInt(p.total));
+	const text = sprintf(t.running, done, fmtInt(p.total));
 	return p.stalled ? text : text + ' ' + t.leave;
 }
 
@@ -216,6 +218,39 @@ function renderFailures(p) {
 	});
 }
 
+/**
+ * The paused notice's way forward: a link to the settings page that fixes it,
+ * for users who can open it (manage_options), otherwise who to contact.
+ */
+function renderPauseLink(p) {
+	const pause = part('.aat-bulk-pause-link');
+	let href = '';
+	let text = '';
+	if (p.state === 'paused_connector' && links.connector) {
+		href = links.connector;
+		text = t.open_approval;
+	} else if ((p.state === 'paused_auth' || p.state === 'paused_no_key') && links.connection) {
+		href = links.connection;
+		text = t.open_connection;
+	}
+	pause.hidden = href === '';
+	if (href === '') {
+		return;
+	}
+	if (cfg.canManage !== true) {
+		setText(pause, t.contact_admin);
+		return;
+	}
+	let pauseLink = pause.querySelector('a');
+	if (!pauseLink) {
+		pause.textContent = '';
+		pauseLink = link('', '', '');
+		pause.appendChild(pauseLink);
+	}
+	setText(pauseLink, text);
+	pauseLink.href = href;
+}
+
 /** Creates the notice when it is missing, otherwise updates it in place. */
 function renderNotice(p) {
 	const created = !root();
@@ -245,19 +280,7 @@ function renderNotice(p) {
 	setText(stalled, showStalled ? t.stalled : '');
 	stalled.hidden = !showStalled;
 
-	const pause = part('.aat-bulk-pause-link');
-	const pauseLink = pause.querySelector('a');
-	if (p.state === 'paused_connector' && links.connector) {
-		pauseLink.textContent = t.open_approval;
-		pauseLink.href = links.connector;
-		pause.hidden = false;
-	} else if ((p.state === 'paused_auth' || p.state === 'paused_no_key') && links.connection) {
-		pauseLink.textContent = t.open_connection;
-		pauseLink.href = links.connection;
-		pause.hidden = false;
-	} else {
-		pause.hidden = true;
-	}
+	renderPauseLink(p);
 
 	renderFailures(p);
 

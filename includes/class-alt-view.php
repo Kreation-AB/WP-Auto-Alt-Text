@@ -13,7 +13,8 @@ class Auto_Alt_Text_Alt_View {
     public static function register(): void {
         add_action('restrict_manage_posts', [self::class, 'render_filter'], 10, 1);
         add_filter('ajax_query_attachments_args', [self::class, 'filter_grid_query']);
-        add_action('pre_get_posts', [self::class, 'filter_list_query']);
+        // Late, so a plugin that replaces meta_query at the default priority can't drop our clause.
+        add_action('pre_get_posts', [self::class, 'filter_list_query'], 99);
         add_filter('manage_media_columns', [self::class, 'add_column']);
         add_action('manage_media_custom_column', [self::class, 'render_column'], 10, 2);
     }

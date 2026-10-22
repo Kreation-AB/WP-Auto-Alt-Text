@@ -101,4 +101,31 @@ class Auto_Alt_Text_Bulk_Rest_Test extends WP_UnitTestCase {
         $this->assertNotNull($response->get_data()['bulk']);
         $this->assertSame([15.0], $budgets);
     }
+
+    public function test_tick_route_claims_one_job_per_batch() {
+        $this->call('POST', '', ['attachment_ids' => [$this->image(), $this->image(), $this->image()]]);
+        global $wpdb;
+        $table = Auto_Alt_Text_Queue::get_table_name();
+        $claimed = [];
+        add_filter('pre_http_request', static function ($pre, $args, $url) use (&$claimed, $wpdb, $table) {
+            if (false === strpos((string) $url, 'openai.com')) {
+                return $pre;
+            }
+            // Jobs claimed at the moment of each API call: the whole batch.
+            $claimed[] = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table} WHERE status = 'processing'");
+            $body = [
+                'status' => 'completed',
+                'output' => [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Plugin text.']]]],
+                'usage'  => ['input_tokens' => 10, 'output_tokens' => 3, 'total_tokens' => 13],
+            ];
+            return ['headers' => [], 'body' => wp_json_encode($body), 'response' => ['code' => 200, 'message' => 'OK'], 'cookies' => []];
+        }, 20, 3);
+
+        $response = $this->call('POST', '/tick');
+        $this->assertSame(200, $response->get_status());
+        $this->assertSame([1, 1, 1], $claimed);
+        $this->assertSame('finished', $response->get_data()['bulk']['state']);
+        // The batch size is only forced during the tab tick.
+        $this->assertFalse(has_filter('aat_queue_batch_size'));
+    }
 }

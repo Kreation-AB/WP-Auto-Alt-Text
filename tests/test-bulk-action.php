@@ -115,7 +115,6 @@ class Auto_Alt_Text_Bulk_Action_Test extends WP_UnitTestCase {
     }
 
     public function test_admin_post_dismiss_and_cancel_check_nonce_and_capability() {
-        $this->image();
         Auto_Alt_Text_Bulk::request($this->editor, [$this->image()]);
 
         foreach (['dismiss', 'cancel'] as $action) {

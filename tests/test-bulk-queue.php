@@ -30,10 +30,10 @@ class Auto_Alt_Text_Bulk_Queue_Test extends WP_UnitTestCase {
         });
     }
 
-    private function run_id(): int {
+    private function run_id(int $missing = 1): int {
         global $wpdb;
         update_option('aat_library_counts', [
-            'missing' => 1, 'ai' => 0, 'human' => 0, 'unsupported' => 0,
+            'missing' => $missing, 'ai' => 0, 'human' => 0, 'unsupported' => 0,
             'max_id' => (int) $wpdb->get_var("SELECT MAX(ID) FROM {$wpdb->posts}"),
             'updated_at' => time(), 'complete' => true,
         ], false);
@@ -91,7 +91,9 @@ class Auto_Alt_Text_Bulk_Queue_Test extends WP_UnitTestCase {
 
     public function test_enqueue_bulk_takes_over_a_pending_run_job() {
         $att = $this->image();
-        $run = $this->run_id();
+        $run = $this->run_id(2);
+        // The run already filled one image; the other is still pending when the bulk takes it.
+        $this->row($this->image(), 'library', 'done', $run);
         $id = $this->row($att, 'library', 'pending', $run, [
             'attempts' => 3, 'last_error' => 'boom',
             'next_attempt_at' => gmdate('Y-m-d H:i:s', time() + 3600),
@@ -105,6 +107,22 @@ class Auto_Alt_Text_Bulk_Queue_Test extends WP_UnitTestCase {
         $this->assertSame('0', (string) $row['attempts']);
         $this->assertNull($row['last_error']);
         $this->assertLessThanOrEqual(time(), strtotime($row['next_attempt_at'] . ' UTC'));
+
+        // The bulk finishes the image, then the run closes: it counts the image
+        // it no longer has as skipped, and its summary still adds up.
+        global $wpdb;
+        $wpdb->update(Auto_Alt_Text_Queue::get_table_name(), ['status' => 'done'], ['id' => $id]);
+        Auto_Alt_Text_Library_Run::finalize($run, Auto_Alt_Text_Library_Run::STATUS_FINISHED);
+        $closed = Auto_Alt_Text_Library_Run::get($run);
+        $this->assertSame(Auto_Alt_Text_Library_Run::STATUS_FINISHED, $closed['status']);
+        $summary = $closed['summary'];
+        $this->assertSame(1, (int) $summary['filled']);
+        $this->assertSame(1, (int) $summary['skipped']);
+        $this->assertSame(0, (int) $summary['failed']);
+        $this->assertSame((int) $closed['total'], (int) $summary['filled'] + (int) $summary['skipped'] + (int) $summary['failed']);
+        $progress = Auto_Alt_Text_Library_Run::progress($closed);
+        $this->assertSame($progress['total'], $progress['filled'] + $progress['skipped'] + $progress['failed']);
+        $this->assertSame(2, $progress['total']);
     }
 
     public function test_enqueue_bulk_tracks_a_processing_job_unchanged() {

@@ -72,22 +72,38 @@ class Auto_Alt_Text_Bulk_Notice_Test extends WP_UnitTestCase {
 
     public function test_paused_variants() {
         $this->queue(2);
+        $this->set_rows('done', 1);
+        $admin = self::factory()->user->create(['role' => 'administrator']);
 
         set_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT, 1, 600);
         $html = $this->render();
         $this->assertStringContainsString('notice-warning', $html);
         $this->assertStringContainsString('data-state="paused_auth"', $html);
         $this->assertStringContainsString('OpenAI avvisade API-nyckeln', $html);
-        $this->assertStringContainsString('Öppna Anslutning', $html);
+        // The progress bar's text equivalent stays visible while paused.
+        $this->assertStringContainsString('fortsätter när nyckeln fungerar. 1 av 2 bilder klara.', $html);
+        // An editor can't open the settings page: no link, but who to ask.
+        $this->assertStringNotContainsString('Öppna Anslutning', $html);
+        $this->assertStringContainsString('Kontakta webbplatsens administratör.', $html);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);
 
         $progress = Auto_Alt_Text_Bulk::progress($this->editor);
+        wp_set_current_user($admin);
+        $auth = Auto_Alt_Text_Bulk_Notice::html(array_merge($progress, ['state' => 'paused_auth']));
+        $this->assertStringContainsString('Öppna Anslutning', $auth);
+        $this->assertStringNotContainsString('Kontakta webbplatsens administratör.', $auth);
+
         $quota = Auto_Alt_Text_Bulk_Notice::html(array_merge($progress, ['state' => 'paused_quota']));
         $this->assertStringContainsString('kvoten på OpenAI-kontot är slut', $quota);
+        $this->assertStringContainsString('1 av 2 bilder klara.', $quota);
 
         $connector = Auto_Alt_Text_Bulk_Notice::html(array_merge($progress, ['state' => 'paused_connector']));
         $this->assertStringContainsString('WordPress AI-anslutningen behöver godkännas', $connector);
         $this->assertStringContainsString(esc_url(Auto_Alt_Text_Connector_Status::approval_url()), $connector);
+        wp_set_current_user($this->editor);
+        $connector = Auto_Alt_Text_Bulk_Notice::html(array_merge($progress, ['state' => 'paused_connector']));
+        $this->assertStringNotContainsString(esc_url(Auto_Alt_Text_Connector_Status::approval_url()), $connector);
+        $this->assertStringContainsString('Kontakta webbplatsens administratör.', $connector);
 
         delete_option('auto_alt_text_api_key');
         $html = $this->render();

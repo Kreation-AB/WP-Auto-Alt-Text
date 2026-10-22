@@ -112,12 +112,31 @@ class Auto_Alt_Text_Library_Runner {
 
     /**
      * A budgeted tick for a request that is already open (the browser
-     * fallback). It never waits idle.
+     * fallback). It never waits idle. The queue checks its budget between
+     * batches, so it runs one job per batch here: a batch of five on a slow
+     * host could outlast the web server's timeout and leave jobs processing
+     * and the lock held.
      *
      * @return int|null Jobs processed, or null when another runner holds the lock.
      */
     public static function tick_for_request(float $budget): ?int {
-        return self::run_locked($budget, false);
+        ignore_user_abort(true);
+        self::extend_time_limit($budget);
+        $one_per_batch = static fn(): int => 1;
+        add_filter('aat_queue_batch_size', $one_per_batch, PHP_INT_MAX);
+        try {
+            return self::run_locked($budget, false);
+        } finally {
+            remove_filter('aat_queue_batch_size', $one_per_batch, PHP_INT_MAX);
+        }
+    }
+
+    /** Gives a tick room to finish; a request without a limit (CLI) keeps none. */
+    private static function extend_time_limit(float $budget): void {
+        if (function_exists('set_time_limit') && 0 !== (int) ini_get('max_execution_time')) {
+            // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- A tick may outlast the default limit.
+            @set_time_limit((int) ceil($budget) + 20 + self::EXTRA_TIME_LIMIT);
+        }
     }
 
     /** Unix time of the last tick that processed a job; 0 when never. */
@@ -133,9 +152,11 @@ class Auto_Alt_Text_Library_Runner {
     }
 
     /**
-     * Runs the budgeted queue under the runner lock. After an idle tick the
-     * background request waits (still holding the lock) so a chain of idle
-     * ticks cannot spin.
+     * Runs the budgeted queue under the runner lock. While a library run is
+     * active, an idle tick of the background request waits (still holding
+     * the lock) so the run's chain of idle ticks cannot spin. Without a run
+     * there is no wait: handle_tick_request() does not chain after an idle
+     * tick, and the minutely cron restarts the chain.
      *
      * @return int|null Jobs processed, or null when another runner holds the lock.
      */
@@ -274,10 +295,7 @@ class Auto_Alt_Text_Library_Runner {
 
         ignore_user_abort(true);
         wp_raise_memory_limit('admin');
-        if (function_exists('set_time_limit')) {
-            // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- A tick may outlast the default limit.
-            @set_time_limit((int) ceil(self::budget()) + 20 + self::EXTRA_TIME_LIMIT);
-        }
+        self::extend_time_limit(self::budget());
 
         $processed = self::run_locked(self::budget(), true);
         // With no run to wait for, an idle tick must not chain again: the cron tick restarts it.

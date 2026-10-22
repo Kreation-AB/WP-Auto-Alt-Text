@@ -170,6 +170,8 @@ class Auto_Alt_Text_Admin {
             'pollSeconds' => 5,
             'i18n'        => Auto_Alt_Text_Bulk_Notice::strings(),
             'links'       => Auto_Alt_Text_Bulk_Notice::links(),
+            // The paused notice links to settings pages only for those who can open them.
+            'canManage'   => current_user_can('manage_options'),
             'gridFilter'  => [
                 'param' => Auto_Alt_Text_Alt_View::PARAM,
                 'value' => Auto_Alt_Text_Alt_View::MISSING,

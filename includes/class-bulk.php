@@ -1,4 +1,6 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) exit;
+
 /**
  * Per-user bulk generation: request, tracking, progress, cancel and dismiss.
  *
@@ -59,7 +61,7 @@ class Auto_Alt_Text_Bulk {
     public static function request(int $user_id, array $attachment_ids) {
         $ids = array_values(array_unique(array_filter(array_map('absint', $attachment_ids))));
         if (empty($ids)) {
-            return new WP_Error('aat_bulk_empty', 'Markera minst en bild.', ['status' => 400]);
+            return new WP_Error('aat_bulk_empty', __('Markera minst en bild.', 'WP-Auto-Alt-Text'), ['status' => 400]);
         }
         if (count($ids) > self::MAX_PER_REQUEST) {
             return new WP_Error('aat_bulk_too_many', __('Markera högst 1 000 bilder åt gången. Använd Hela biblioteket för fler.', 'WP-Auto-Alt-Text'), ['status' => 400]);

@@ -67,8 +67,11 @@ class Auto_Alt_Text_Bulk_Notice {
             'paused_quota'    => __('Genereringen är pausad: kvoten på OpenAI-kontot är slut. Bilderna ligger kvar i kön och fortsätter när kvoten har fyllts på.', 'WP-Auto-Alt-Text'),
             'paused_connector' => __('Genereringen är pausad: WordPress AI-anslutningen behöver godkännas.', 'WP-Auto-Alt-Text'),
             'paused_no_key'   => __('Genereringen är pausad: ingen API-nyckel är angiven.', 'WP-Auto-Alt-Text'),
+            /* translators: 1: images done, 2: images in total. */
+            'paused_count'    => __('%1$s av %2$s bilder klara.', 'WP-Auto-Alt-Text'),
             'open_connection' => __('Öppna Anslutning', 'WP-Auto-Alt-Text'),
             'open_approval'   => __('Öppna godkännandesidan', 'WP-Auto-Alt-Text'),
+            'contact_admin'   => __('Kontakta webbplatsens administratör.', 'WP-Auto-Alt-Text'),
             'finished_none'   => __('Klart: ingen bild fick alt-text.', 'WP-Auto-Alt-Text'),
             'finished_one'    => __('Klart: 1 bild fick alt-text.', 'WP-Auto-Alt-Text'),
             /* translators: %s: number of images. */
@@ -168,10 +171,12 @@ class Auto_Alt_Text_Bulk_Notice {
         $s = self::strings();
         $state = (string) $p['state'];
         if ('finished' !== $state) {
+            $done = self::num(max(0, (int) $p['total'] - (int) $p['pending']));
             if (0 === strpos($state, 'paused_')) {
-                return $s[$state] ?? $s['paused_auth'];
+                // The count is the progress bar's text equivalent.
+                return ($s[$state] ?? $s['paused_auth']) . ' ' . sprintf($s['paused_count'], $done, self::num((int) $p['total']));
             }
-            $text = sprintf($s['running'], self::num((int) $p['total'] - (int) $p['pending']), self::num((int) $p['total']));
+            $text = sprintf($s['running'], $done, self::num((int) $p['total']));
             return empty($p['stalled']) ? $text . ' ' . $s['leave'] : $text;
         }
         $written = (int) $p['written'];
@@ -223,12 +228,17 @@ class Auto_Alt_Text_Bulk_Notice {
         );
         printf('<p class="aat-bulk-retrying"%s>%s</p>', $retrying ? '' : ' hidden', $retrying ? esc_html(sprintf($s['retrying'], self::num((int) $p['retrying']))) : '');
         printf('<p class="aat-bulk-stalled"%s>%s</p>', $stalled ? '' : ' hidden', $stalled ? esc_html($s['stalled']) : '');
-        printf(
-            '<p class="aat-bulk-pause-link"%s><a href="%s">%s</a></p>',
-            '' !== $link_url ? '' : ' hidden',
-            esc_url($link_url),
-            esc_html($link_text)
-        );
+        if ('' === $link_url || current_user_can('manage_options')) {
+            printf(
+                '<p class="aat-bulk-pause-link"%s><a href="%s">%s</a></p>',
+                '' !== $link_url ? '' : ' hidden',
+                esc_url($link_url),
+                esc_html($link_text)
+            );
+        } else {
+            // The linked pages need manage_options: point to the person who has it.
+            printf('<p class="aat-bulk-pause-link">%s</p>', esc_html($s['contact_admin']));
+        }
         printf('<details class="aat-bulk-failures"%s><summary>%s</summary><ul>', $failures ? '' : ' hidden', esc_html($s['failures_toggle']));
         foreach ($failures as $failure) {
             printf(

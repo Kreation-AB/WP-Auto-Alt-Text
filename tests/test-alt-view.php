@@ -29,6 +29,21 @@ class Auto_Alt_Text_Alt_View_Test extends WP_UnitTestCase {
         return $query->posts;
     }
 
+    public function test_list_filter_runs_after_plugins_that_replace_the_meta_query() {
+        remove_action('pre_get_posts', [Auto_Alt_Text_Alt_View::class, 'filter_list_query']);
+        Auto_Alt_Text_Alt_View::register();
+        $this->assertSame(99, has_action('pre_get_posts', [Auto_Alt_Text_Alt_View::class, 'filter_list_query']));
+        // A plugin (a folder filter, say) that sets meta_query outright at the default priority.
+        add_action('pre_get_posts', static function (WP_Query $query): void {
+            $query->set('meta_query', [['key' => '_aat_test_folder', 'compare' => 'NOT EXISTS']]);
+        });
+        $missing = $this->image();
+        $with_alt = $this->image('Text');
+        $found = array_map('intval', $this->main_query());
+        $this->assertContains($missing, $found);
+        $this->assertNotContains($with_alt, $found);
+    }
+
     public function test_missing_filter_matches_absent_empty_and_whitespace_alt() {
         $a = $this->image();
         $b = $this->image('');

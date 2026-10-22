@@ -127,6 +127,22 @@ test.describe( 'bulk generation', () => {
 		await expect( page ).not.toHaveURL( /aat_bulk_rejected/ );
 	} );
 
+	test( 'a paused bulk keeps its count and links to the fix', async ( { page } ) => {
+		await queueThree( page );
+		try {
+			// The polling module picks up the auth pause and re-renders the notice.
+			wpCli( [ 'transient', 'set', 'aat_queue_auth_pause', '1', '600' ] );
+			await expect( page.locator( '#aat-bulk-notice' ) ).toHaveAttribute( 'data-state', 'paused_auth', { timeout: 15000 } );
+			await expect( page.locator( '#aat-bulk-summary' ) ).toContainText( 'OpenAI avvisade API-nyckeln' );
+			await expect( page.locator( '#aat-bulk-summary' ) ).toContainText( 'av 3 bilder klara.' );
+			// The admin can open the settings page.
+			await expect( page.locator( '.aat-bulk-pause-link a' ) ).toHaveText( 'Öppna Anslutning' );
+			await expect( page.locator( '.aat-bulk-pause-link a' ) ).toHaveAttribute( 'href', /page=auto-alt-text/ );
+		} finally {
+			wpCli( [ 'transient', 'delete', 'aat_queue_auth_pause' ] );
+		}
+	} );
+
 	test( 'cancel stops pending images', async ( { page } ) => {
 		await queueThree( page );
 		await page.locator( '.aat-bulk-cancel' ).click();
