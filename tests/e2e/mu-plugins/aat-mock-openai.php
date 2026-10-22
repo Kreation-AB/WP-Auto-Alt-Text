@@ -68,6 +68,8 @@ function aat_e2e_mock_filter( $pre, array $args, string $url ) {
 	if ( false === strpos( $url, 'openai.com' ) ) {
 		return $pre;
 	}
+	// Optional latency, to measure throughput against a realistic API.
+	usleep( (int) get_option( 'aat_e2e_latency_ms', 0 ) * 1000 );
 	return aat_e2e_mock_route( (string) ( $args['method'] ?? 'GET' ), $url );
 }
 

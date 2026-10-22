@@ -10,6 +10,7 @@ class Auto_Alt_Text_Library_Runner {
     public const TICK_ACTION  = 'aat_library_tick';
     public const TOKEN_OPTION = 'aat_library_runner_token';
     public const LOCK_OPTION  = 'aat_library_runner_lock';
+    public const LAST_TICK_OPTION = 'aat_runner_last_tick';
     private const LOCK_SECONDS = 120;
     private const EXTRA_TIME_LIMIT = 30;
     private const CHAIN_MAX_BACKOFF = 60;
@@ -95,15 +96,40 @@ class Auto_Alt_Text_Library_Runner {
         return sprintf('%010d|%s', time() + self::LOCK_SECONDS, $owner);
     }
 
-    /** The cron entry point. Without an active run it is a plain queue run. */
+    /**
+     * The cron entry point. With an active run or due bulk work it is a locked
+     * tick that keeps the chain going; otherwise a plain queue run.
+     */
     public static function cron_tick(): void {
-        if (null === Auto_Alt_Text_Library_Run::active()) {
+        if (null === Auto_Alt_Text_Library_Run::active() && 0 === Auto_Alt_Text_Queue::due_bulk_count()) {
             (new Auto_Alt_Text_Queue())->run();
             return;
         }
-        if (null !== self::run_locked(false)) {
+        if (null !== self::run_locked(self::budget(), false)) {
             self::maybe_chain();
         }
+    }
+
+    /**
+     * A budgeted tick for a request that is already open (the browser
+     * fallback). It never waits idle.
+     *
+     * @return int|null Jobs processed, or null when another runner holds the lock.
+     */
+    public static function tick_for_request(float $budget): ?int {
+        return self::run_locked($budget, false);
+    }
+
+    /** Unix time of the last tick that processed a job; 0 when never. */
+    public static function last_tick_at(): int {
+        return (int) get_option(self::LAST_TICK_OPTION, 0);
+    }
+
+    /** Whether bulk jobs could be processed now: a key, no auth pause and no quota incident. */
+    public static function bulk_can_run(): bool {
+        return Auto_Alt_Text_Queue::has_api_key()
+            && !get_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT)
+            && !Auto_Alt_Text_Quota_Monitor::is_active();
     }
 
     /**
@@ -113,17 +139,19 @@ class Auto_Alt_Text_Library_Runner {
      *
      * @return int|null Jobs processed, or null when another runner holds the lock.
      */
-    private static function run_locked(bool $wait_when_idle): ?int {
+    private static function run_locked(float $budget, bool $wait_when_idle): ?int {
         $owner = self::take_lock();
         if (null === $owner) {
             return null;
         }
         try {
             $started = microtime(true);
-            $budget = self::budget();
             $processed = (new Auto_Alt_Text_Queue())->run($budget, static function () use ($owner): void {
                 self::refresh_lock($owner);
             });
+            if ($processed > 0) {
+                update_option(self::LAST_TICK_OPTION, time(), false);
+            }
             $run = $wait_when_idle && 0 === $processed ? Auto_Alt_Text_Library_Run::active() : null;
             if (null !== $run) {
                 self::idle_wait(max(0.0, $budget - (microtime(true) - $started)), $run['id']);
@@ -206,21 +234,23 @@ class Auto_Alt_Text_Library_Runner {
     }
 
     /**
-     * Sends the loopback request that runs the next tick, unless the run is
-     * not working (none, paused by the user, quota or auth stop, no API key)
-     * or a runner is already busy.
+     * Sends the loopback request that runs the next tick. A running run keeps
+     * it going; otherwise due bulk jobs do, if a key, no auth pause and no
+     * quota incident allow it. Never while a runner is already busy.
      */
     public static function maybe_chain(): bool {
         $run = Auto_Alt_Text_Library_Run::active();
-        if (null === $run || 'running' !== Auto_Alt_Text_Library_Run::display_state($run)['state']) {
-            return false;
-        }
-        if (!Auto_Alt_Text_Queue::has_api_key() || self::lock_held()) {
-            return false;
-        }
-        // Only long backoffs left and nothing to feed: the minutely cron tick restarts the chain.
-        $state = self::claimable_state($run['id']);
-        if (0 === $state['due'] && null !== $state['next'] && $state['next'] - time() > self::CHAIN_MAX_BACKOFF && !$state['can_feed']) {
+        if (null !== $run && 'running' === Auto_Alt_Text_Library_Run::display_state($run)['state']) {
+            if (!Auto_Alt_Text_Queue::has_api_key() || self::lock_held()) {
+                return false;
+            }
+            // Only long backoffs left and nothing to feed: the minutely cron tick restarts the chain.
+            $state = self::claimable_state($run['id']);
+            if (0 === $state['due'] && null !== $state['next'] && $state['next'] - time() > self::CHAIN_MAX_BACKOFF && !$state['can_feed']) {
+                return false;
+            }
+        } elseif (0 === Auto_Alt_Text_Queue::due_bulk_count() || !self::bulk_can_run() || self::lock_held()) {
+            // No working run: only due bulk work keeps the chain going.
             return false;
         }
         $url = admin_url('admin-post.php');
@@ -249,7 +279,9 @@ class Auto_Alt_Text_Library_Runner {
             @set_time_limit((int) ceil(self::budget()) + 20 + self::EXTRA_TIME_LIMIT);
         }
 
-        if (null !== self::run_locked(true)) {
+        $processed = self::run_locked(self::budget(), true);
+        // With no run to wait for, an idle tick must not chain again: the cron tick restarts it.
+        if (null !== $processed && ($processed > 0 || null !== Auto_Alt_Text_Library_Run::active())) {
             self::maybe_chain();
         }
         wp_die('', '', ['response' => 204]);
