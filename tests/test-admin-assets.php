@@ -148,5 +148,9 @@ class Auto_Alt_Text_Admin_Assets_Test extends WP_UnitTestCase {
         $this->assertNotEmpty($cfg['nonce']);
         $this->assertSame(1, wp_verify_nonce($cfg['nonce'], 'wp_rest') ? 1 : 0);
         $this->assertSame(Auto_Alt_Text_Bulk_Notice::strings(), $cfg['i18n']);
+        foreach (['dismiss', 'cancel'] as $key) {
+            $this->assertStringContainsString('&_wpnonce=', $cfg['links'][$key]);
+            $this->assertStringNotContainsString('&amp;', $cfg['links'][$key]);
+        }
     }
 }

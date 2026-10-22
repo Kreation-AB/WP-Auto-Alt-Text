@@ -87,8 +87,8 @@ class Auto_Alt_Text_Bulk_Notice {
     /** Admin-post links and target pages, shared with JS for notices it builds itself. */
     public static function links(): array {
         return [
-            'dismiss'    => wp_nonce_url(admin_url('admin-post.php?action=aat_bulk_dismiss'), 'aat_bulk'),
-            'cancel'     => wp_nonce_url(admin_url('admin-post.php?action=aat_bulk_cancel'), 'aat_bulk'),
+            'dismiss'    => add_query_arg('_wpnonce', wp_create_nonce('aat_bulk'), admin_url('admin-post.php?action=aat_bulk_dismiss')),
+            'cancel'     => add_query_arg('_wpnonce', wp_create_nonce('aat_bulk'), admin_url('admin-post.php?action=aat_bulk_cancel')),
             'connection' => admin_url('admin.php?page=auto-alt-text#aat-section-anslutning'),
             'connector'  => Auto_Alt_Text_Connector_Status::approval_url(),
         ];
@@ -120,11 +120,6 @@ class Auto_Alt_Text_Bulk_Notice {
             $parts[] = 1 === (int) $p['removed'] ? $s['removed_one'] : sprintf($s['removed_many'], self::num((int) $p['removed']));
         }
         return implode(' ', $parts);
-    }
-
-    /** get_the_title() is texturized and entity-encoded; text is escaped once, at output. */
-    private static function plain_title(string $title): string {
-        return html_entity_decode($title, ENT_QUOTES, 'UTF-8');
     }
 
     /** The notice markup for a progress object. Same structure as media-library.js builds. */
@@ -174,7 +169,7 @@ class Auto_Alt_Text_Bulk_Notice {
             printf(
                 '<li><a href="%s">%s</a> <span>%s</span></li>',
                 esc_url((string) $failure['edit_url']),
-                esc_html(self::plain_title((string) $failure['title'])),
+                esc_html((string) $failure['title']),
                 esc_html((string) $failure['message'])
             );
         }

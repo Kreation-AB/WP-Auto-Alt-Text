@@ -293,7 +293,8 @@ class Auto_Alt_Text_Bulk_Test extends WP_UnitTestCase {
         $this->assertSame('OpenAI ville inte beskriva bilden.', $p['failures'][0]['message']);
         $this->assertSame(Auto_Alt_Text_Bulk::failure_message('secret raw text sk-123'), $p['failures'][1]['message']);
         $this->assertStringNotContainsString('secret', wp_json_encode($p));
-        $this->assertSame(get_the_title($ids[24]), $p['failures'][0]['title']);
+        $this->assertStringNotContainsString('&#', $p['failures'][0]['title']);
+        $this->assertStringNotContainsString('&amp;', $p['failures'][0]['title']);
     }
 
     public function test_failure_message_maps_known_errors_and_falls_back() {

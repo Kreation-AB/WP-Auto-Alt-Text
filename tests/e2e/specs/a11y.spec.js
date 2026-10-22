@@ -6,6 +6,15 @@ const { checkA11y } = require( '../utils/axe' );
 
 const SAMPLE = path.resolve( __dirname, '../assets/sample.jpg' );
 
+// Drops the admin's tracked bulk; absent meta makes wp-cli fail, which is fine here.
+function clearBulk() {
+	try {
+		wpCli( [ 'user', 'meta', 'delete', '1', 'aat_bulk' ] );
+	} catch ( e ) {
+		// Nothing tracked.
+	}
+}
+
 test.describe( 'accessibility', () => {
 	let requestUtils;
 	let ids = [];
@@ -26,6 +35,7 @@ test.describe( 'accessibility', () => {
 			await requestUtils.rest( { method: 'DELETE', path: `/wp/v2/media/${ id }`, params: { force: true } } );
 		}
 		ids = [];
+		clearBulk();
 	} );
 
 	test.afterAll( async ( { browser } ) => {
@@ -95,5 +105,6 @@ test.describe( 'accessibility', () => {
 		await expect( page.locator( '#aat-bulk-notice[data-state="finished"]' ) ).toBeVisible( { timeout: 20000 } );
 		await checkA11y( page, { pageName: 'bulk-notice', include: '#aat-bulk-notice' } );
 		await page.locator( '.aat-bulk-dismiss' ).click();
+		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
 	} );
 } );

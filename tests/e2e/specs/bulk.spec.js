@@ -7,6 +7,15 @@ const RESP_TEXT = respText();
 const SAMPLE = path.resolve( __dirname, '../assets/sample.jpg' );
 const EXISTING = 'Befintlig text';
 
+// Drops the admin's tracked bulk; absent meta makes wp-cli fail, which is fine here.
+function clearBulk() {
+	try {
+		wpCli( [ 'user', 'meta', 'delete', '1', 'aat_bulk' ] );
+	} catch ( e ) {
+		// Nothing tracked.
+	}
+}
+
 test.describe( 'bulk generation', () => {
 	let requestUtils;
 	let ids = [];
@@ -35,6 +44,8 @@ test.describe( 'bulk generation', () => {
 			await requestUtils.rest( { method: 'DELETE', path: `/wp/v2/media/${ id }`, params: { force: true } } );
 		}
 		ids = [];
+		// No tracked bulk may leak into the next test.
+		clearBulk();
 	} );
 
 	test.afterAll( async ( { browser } ) => {
@@ -92,11 +103,13 @@ test.describe( 'bulk generation', () => {
 		await queueThree( page );
 		await page.locator( '.aat-bulk-cancel' ).click();
 		await expect( page.locator( '#aat-bulk-summary' ) ).toContainText( 'avbröts' );
+		await expect( page.locator( '.aat-bulk-dismiss' ) ).toBeFocused();
 
 		wpCli( [ 'cron', 'event', 'run', 'aat_queue_tick' ] );
 		expect( await altOf( ids[ 1 ] ) ).toBe( '' );
 		expect( await altOf( ids[ 2 ] ) ).toBe( '' );
 		await page.locator( '.aat-bulk-dismiss' ).click();
+		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
 	} );
 
 	test( 'expired session stops polling', async ( { page } ) => {
@@ -109,5 +122,6 @@ test.describe( 'bulk generation', () => {
 		await page.unroute( '**/wp-auto-alt-text/v1/bulk*' );
 		await page.goto( '/wp-admin/upload.php?mode=list' );
 		await page.locator( '.aat-bulk-dismiss' ).click();
+		await expect( page.locator( '#aat-bulk-notice' ) ).toHaveCount( 0 );
 	} );
 } );

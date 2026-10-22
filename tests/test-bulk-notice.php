@@ -157,15 +157,17 @@ class Auto_Alt_Text_Bulk_Notice_Test extends WP_UnitTestCase {
     }
 
     public function test_titles_are_escaped() {
-        $id = $this->image('<script>x</script> Fish &amp; Chips’');
+        $id = $this->image('&lt;script&gt;x&lt;/script&gt; Fish &amp; Chips\'s');
         Auto_Alt_Text_Bulk::request($this->editor, [$id]);
         $this->set_rows('failed', 1, 'Image could not be read');
         $html = $this->render();
         $this->assertStringNotContainsString('<script>x</script>', $html);
         $this->assertStringContainsString('&lt;script&gt;x&lt;/script&gt;', $html);
-        $this->assertStringContainsString('Fish &amp; Chips’', $html);
+        $this->assertStringContainsString('Fish &amp; Chips’s', $html);
         $this->assertStringNotContainsString('&amp;amp;', $html);
         $this->assertStringNotContainsString('&#8217;', $html);
+        $this->assertStringNotContainsString('&amp;#8217;', $html);
+        $this->assertStringNotContainsString('&amp;amp;', $html);
     }
 
     public function test_nothing_renders_off_the_upload_screen() {

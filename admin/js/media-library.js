@@ -42,13 +42,6 @@ function setText(el, text) {
 	}
 }
 
-/** The server sends get_the_title() output: entity-encoded. A textarea decodes it without parsing tags. */
-function decodeEntities(text) {
-	const area = document.createElement('textarea');
-	area.innerHTML = String(text);
-	return area.value;
-}
-
 function url(path) {
 	return cfg.restUrl + (path || '');
 }
@@ -176,7 +169,7 @@ function renderFailures(p) {
 	failures.forEach((failure) => {
 		const li = el('li');
 		const a = el('a');
-		a.textContent = decodeEntities(failure.title);
+		a.textContent = String(failure.title);
 		a.href = failure.edit_url;
 		const span = el('span');
 		span.textContent = String(failure.message);
@@ -341,12 +334,14 @@ function focusHeading() {
 }
 
 async function control(path, event) {
-	event.preventDefault();
-	if (busy || stopped) {
+	if (stopped || !cfg.restUrl) {
+		// No working session: let the admin-post link do the job.
 		return;
 	}
-	busy = true;
+	event.preventDefault();
+	// An in-flight poll or tick must not delay the click: its response is discarded.
 	seq++;
+	window.clearTimeout(timer);
 	const href = event.currentTarget.href;
 	try {
 		const response = await api('POST', path);
@@ -355,6 +350,10 @@ async function control(path, event) {
 			focusHeading();
 		} else {
 			apply(response.bulk);
+			const dismiss = part('.aat-bulk-dismiss');
+			if (dismiss) {
+				dismiss.focus();
+			}
 		}
 	} catch (error) {
 		if (error.status === 401 || error.status === 403) {
@@ -364,7 +363,6 @@ async function control(path, event) {
 			window.location.href = href;
 		}
 	} finally {
-		busy = false;
 		schedule();
 	}
 }

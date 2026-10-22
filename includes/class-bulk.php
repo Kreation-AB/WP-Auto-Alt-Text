@@ -248,7 +248,7 @@ class Auto_Alt_Text_Bulk {
             $attachment_id = (int) $row->attachment_id;
             $failures[] = [
                 'attachment_id' => $attachment_id,
-                'title'         => get_the_title($attachment_id),
+                'title'         => html_entity_decode(wp_strip_all_tags(get_the_title($attachment_id)), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
                 'edit_url'      => (string) get_edit_post_link($attachment_id, 'raw'),
                 'message'       => self::failure_message($row->last_error),
             ];
