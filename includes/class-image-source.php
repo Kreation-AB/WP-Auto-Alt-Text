@@ -159,6 +159,7 @@ class Auto_Alt_Text_Image_Source {
 
     /** The site's own media URL: trusted, so wp_remote_get (not the "safe" variant) may reach a private host. */
     private function download($url) {
+        self::ensure_tempnam();
         $target = wp_tempnam('aat-image');
         $this->temp_files[] = $target;
         $response = wp_remote_get($url, ['timeout' => self::DOWNLOAD_TIMEOUT, 'stream' => true, 'filename' => $target]);
@@ -168,8 +169,16 @@ class Auto_Alt_Text_Image_Source {
         return $target;
     }
 
+    /** WP-Cron loads only wp-load.php, so wp_tempnam() (wp-admin/includes/file.php) may be undefined there. */
+    private static function ensure_tempnam(): void {
+        if (!function_exists('wp_tempnam')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+    }
+
     /** @return true|WP_Error */
     private function prepare($path) {
+        self::ensure_tempnam();
         $mime = (string) wp_get_image_mime($path);
         $editor = wp_get_image_editor($path);
 
