@@ -188,6 +188,8 @@ For reliable background processing we strongly recommend real server cron instea
 
     * * * * * cd /path/to/site && wp cron event run --due-now >/dev/null 2>&1
 
+Each background round answers its loopback request at once and keeps working after the response, the same way WordPress's `wp-cron.php` does, so web servers that stop requests whose client has gone (LiteSpeed, for example) no longer cut rounds short. Rounds check their time budget after every image. A stalled run restarts the next time someone loads an admin page, and images left half-done by a killed round are retried after 5 minutes. On low-traffic sites such as staging copies, WP-Cron and admin visits are rare, so for long unattended runs add the system cron entry above.
+
 Inspect the queue at any time with `wp auto-alt-text queue` (add `--status=failed` to see errors, `--retry-failed` to re-queue failed jobs), or in the plugin's statistics page in wp-admin.
 
 ## Whole Library ("Hela biblioteket")
@@ -206,6 +208,8 @@ With the page open or not, a run is kept going by loopback chaining: each tick p
 A run can't be started without an API key. If the key is removed while a run is active, the page says so instead of showing the stall warning. If no tick has run for 10 minutes while work is due, the page shows a stall warning. Loopback requests are often blocked by basic auth, firewalls or local DNS; for a reliable run, and when `DISABLE_WP_CRON` is set, add a system cron entry as described under Background Processing:
 
     * * * * * cd /path/to/site && wp cron event run --due-now >/dev/null 2>&1
+
+Before a public URL is sent to OpenAI for an image with no local file (offloaded media), the plugin checks it with a HEAD request. A 404 or 410 fails the image at once with "Bildfilen saknas på servern". Sites whose CDN or storage answers HEAD wrongly can turn the check off with `add_filter('aat_check_remote_image', '__return_false');`. The filter also gets `$url` and `$attachment_id`.
 
 ### Actions
 

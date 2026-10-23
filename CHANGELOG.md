@@ -106,6 +106,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - Genomskinliga bilder skickas inte längre som JPEG med svart bakgrund.
 - Filnamn som är hashar eller kameranamn skickas inte längre till AI:n som ledtråd.
 - Bilder med EXIF-orientering skickas nu upprätta till AI:n.
+- **Bilder vars fil saknas.** Bilder vars fil saknas på servern rapporteras direkt med "Bildfilen saknas på servern". När OpenAI inte kan hämta en bild säger meddelandet det, i stället för "Model request format error".
 
 #### Bakgrund och kö
 
@@ -113,6 +114,7 @@ Den här versionen gör att pluginet slutar störa WooCommerce, WordPress och fl
 - En bild som kraschar under bearbetningen blockerar inte längre kön för alltid.
 - Ett 429-svar (”för många anrop”) från OpenAI använder inte längre upp ett försök i kön. Bilden väntar tills gränsen har återställts och prövas sedan igen.
 - Köjobb som kördes av riktig WP-Cron misslyckades eftersom en WordPress-funktion (`wp_tempnam`) inte var laddad utanför adminpanelen. De fungerar nu.
+- **Hela biblioteket och massgenereringar stannade på vissa webbhotell.** På servrar som LiteSpeed kunde de stanna halvvägs tills någon besökte webbplatsen. Varje runda avslutar nu webbanropet direkt och fortsätter arbeta i bakgrunden, rundorna är kortare, och en stoppad körning startar igen nästa gång någon öppnar adminpanelen.
 - Databasuppdateringen efter en ny version körs av adminpanelen, cron och WP-CLI, inte längre vid vanliga sidvisningar eller i kassan. Anrop turas om, och ett anrop som måste skriva till tabellerna väntar på en pågående uppdatering.
 
 #### WooCommerce
