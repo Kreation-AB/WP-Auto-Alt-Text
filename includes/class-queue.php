@@ -800,11 +800,15 @@ class Auto_Alt_Text_Queue {
      * mid-job, e.g. a fatal, memory exhaustion or a host stopping the
      * request). That counts as a used attempt with the normal backoff, so a
      * job that kills the runner every time ends up failed instead of being
-     * retried first on every tick. Five minutes is well above how long a live
-     * runner keeps a row processing: a budgeted round claims one job per
-     * batch (one OpenAI request of at most 30 s, plus image preparation and
-     * at most 5 s of rate-limit wait), and the plain run() a batch of five,
-     * under about 3 minutes.
+     * retried first on every tick. Five minutes is well above how long a
+     * budgeted round keeps a row processing: it claims one job per batch (one
+     * OpenAI request of at most 30 s, plus image preparation and at most 5 s
+     * of rate-limit wait). The plain run() claims a batch of five, typically
+     * done in under about 3 minutes; with worst-case jobs the last of the five
+     * can stay processing longer. Recovering such a live job costs it at most an
+     * attempt: its runner's own write (finish(), or the retry) then
+     * overwrites the recovered status, and the backoff keeps other runners
+     * from claiming it meanwhile.
      */
     private function recover_stuck_jobs() {
         global $wpdb;

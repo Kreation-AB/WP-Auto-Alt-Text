@@ -361,7 +361,9 @@ class Auto_Alt_Text_Library_Runner {
         if (null !== $processed && ($processed > 0 || null !== Auto_Alt_Text_Library_Run::active())) {
             self::maybe_chain();
         }
-        // The response has ended: this output goes nowhere, and wp_die() skips its headers.
+        // Where the response has already ended (PHP-FPM, LiteSpeed) this output
+        // goes nowhere and wp_die() skips its headers; elsewhere (mod_php, CGI)
+        // the request is still open and wp_die() sends its 204 as before.
         wp_die('', '', ['response' => 204]);
     }
 
@@ -375,7 +377,7 @@ class Auto_Alt_Text_Library_Runner {
         if (!headers_sent()) {
             status_header(204);
             nocache_headers();
-            header('Content-Length: 0');
+            // No Content-Length: RFC 9110 forbids it on a 204.
             header('Connection: close');
         }
         if (function_exists('fastcgi_finish_request')) {
