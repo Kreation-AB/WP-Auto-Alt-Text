@@ -204,6 +204,7 @@ class WP_Auto_Alt_Text_Plugin {
 		add_action('aat_library_run_resumed', ['Auto_Alt_Text_Library_Runner', 'on_run_event']);
 		add_action('admin_post_nopriv_' . Auto_Alt_Text_Library_Runner::TICK_ACTION, ['Auto_Alt_Text_Library_Runner', 'handle_tick_request']);
 		add_action('admin_post_' . Auto_Alt_Text_Library_Runner::TICK_ACTION, ['Auto_Alt_Text_Library_Runner', 'handle_tick_request']);
+		add_action('admin_init', ['Auto_Alt_Text_Library_Runner', 'on_admin_init']);
 		add_action('admin_post_aat_bulk_dismiss', ['Auto_Alt_Text_Admin', 'handle_bulk_dismiss']);
 		add_action('admin_post_aat_bulk_cancel', ['Auto_Alt_Text_Admin', 'handle_bulk_cancel']);
 		add_action('admin_post_aat_library_report', ['Auto_Alt_Text_Library_Report', 'handle_download']);

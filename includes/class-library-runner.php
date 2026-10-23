@@ -2,9 +2,16 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 /**
- * Background runner for a library run: a time-budgeted queue tick chained by
- * a non-blocking loopback request, so the queue keeps working without visits
- * or an open tab. WP-Cron remains the fallback that restarts a broken chain.
+ * Background runner for a library run and bulk work: a time-budgeted queue
+ * round chained by a non-blocking loopback request, so the queue keeps
+ * working without visits or an open tab.
+ *
+ * The loopback round ends its HTTP response before any work, as wp-cron.php
+ * does: the sender has already gone, and a host such as LiteSpeed may stop a
+ * request that stays open. Every budgeted round claims one job per batch, so
+ * the budget is checked after every job and a round stays short. A chain
+ * that stops anyway is restarted by the minutely WP-Cron tick, or by
+ * maybe_restart() on admin visits and the pages' polling requests.
  */
 class Auto_Alt_Text_Library_Runner {
     public const TICK_ACTION  = 'aat_library_tick';
@@ -14,6 +21,9 @@ class Auto_Alt_Text_Library_Runner {
     private const LOCK_SECONDS = 120;
     private const EXTRA_TIME_LIMIT = 30;
     private const CHAIN_MAX_BACKOFF = 60;
+    private const RESTART_CHECK_TRANSIENT = 'aat_runner_restart_check';
+    private const RESTART_CHECK_SECONDS = 60;
+    private const RESTART_STALE_SECONDS = 120;
 
     /** The shared secret of the loopback request; created on first use. */
     public static function token(): string {
@@ -112,31 +122,34 @@ class Auto_Alt_Text_Library_Runner {
 
     /**
      * A budgeted tick for a request that is already open (the browser
-     * fallback). It never waits idle. The queue checks its budget between
-     * batches, so it runs one job per batch here: a batch of five on a slow
-     * host could outlast the web server's timeout and leave jobs processing
-     * and the lock held.
+     * fallback). It never waits idle.
      *
      * @return int|null Jobs processed, or null when another runner holds the lock.
      */
     public static function tick_for_request(float $budget): ?int {
         ignore_user_abort(true);
         self::extend_time_limit($budget);
-        $one_per_batch = static fn(): int => 1;
-        add_filter('aat_queue_batch_size', $one_per_batch, PHP_INT_MAX);
-        try {
-            return self::run_locked($budget, false);
-        } finally {
-            remove_filter('aat_queue_batch_size', $one_per_batch, PHP_INT_MAX);
+        return self::run_locked($budget, false);
+    }
+
+    /** Gives a tick room to finish; never lowers the server's limit. */
+    private static function extend_time_limit(float $budget): void {
+        $limit = self::time_limit_for((int) ini_get('max_execution_time'), $budget);
+        if (null !== $limit && function_exists('set_time_limit')) {
+            // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- A tick may outlast the default limit.
+            @set_time_limit($limit);
         }
     }
 
-    /** Gives a tick room to finish; a request without a limit (CLI) keeps none. */
-    private static function extend_time_limit(float $budget): void {
-        if (function_exists('set_time_limit') && 0 !== (int) ini_get('max_execution_time')) {
-            // phpcs:ignore Squiz.PHP.DiscouragedFunctions.Discouraged -- A tick may outlast the default limit.
-            @set_time_limit((int) ceil($budget) + 20 + self::EXTRA_TIME_LIMIT);
-        }
+    /**
+     * The time limit a round of this budget needs: the budget plus a margin
+     * for the job still running when it ends. Null when the current limit is
+     * already that high or there is none (0, e.g. CLI), so the server's
+     * limit is never lowered.
+     */
+    public static function time_limit_for(int $current, float $budget): ?int {
+        $needed = (int) ceil($budget) + 20 + self::EXTRA_TIME_LIMIT;
+        return (0 !== $current && $current < $needed) ? $needed : null;
     }
 
     /** Unix time of the last tick that processed a job; 0 when never. */
@@ -152,11 +165,15 @@ class Auto_Alt_Text_Library_Runner {
     }
 
     /**
-     * Runs the budgeted queue under the runner lock. While a library run is
-     * active, an idle tick of the background request waits (still holding
-     * the lock) so the run's chain of idle ticks cannot spin. Without a run
-     * there is no wait: handle_tick_request() does not chain after an idle
-     * tick, and the minutely cron restarts the chain.
+     * Runs the budgeted queue under the runner lock, one job per batch: the
+     * queue checks its budget between batches, and a batch of five with a
+     * 30 s request timeout each could stretch a round to minutes, past the
+     * host's limits, leaving jobs processing and the lock held. While a
+     * library run is active, an idle tick of the background request waits
+     * (still holding the lock) so the run's chain of idle ticks cannot spin.
+     * Without a run there is no wait: handle_tick_request() does not chain
+     * after an idle tick, and the minutely cron or maybe_restart() restarts
+     * the chain.
      *
      * @return int|null Jobs processed, or null when another runner holds the lock.
      */
@@ -167,9 +184,15 @@ class Auto_Alt_Text_Library_Runner {
         }
         try {
             $started = microtime(true);
-            $processed = (new Auto_Alt_Text_Queue())->run($budget, static function () use ($owner): void {
-                self::refresh_lock($owner);
-            });
+            $one_per_batch = static fn(): int => 1;
+            add_filter('aat_queue_batch_size', $one_per_batch, PHP_INT_MAX);
+            try {
+                $processed = (new Auto_Alt_Text_Queue())->run($budget, static function () use ($owner): void {
+                    self::refresh_lock($owner);
+                });
+            } finally {
+                remove_filter('aat_queue_batch_size', $one_per_batch, PHP_INT_MAX);
+            }
             if ($processed > 0) {
                 update_option(self::LAST_TICK_OPTION, time(), false);
             }
@@ -254,6 +277,11 @@ class Auto_Alt_Text_Library_Runner {
         self::maybe_chain();
     }
 
+    /** Hooked to admin_init: admin page loads and the heartbeat restart a stalled chain. */
+    public static function on_admin_init(): void {
+        self::maybe_restart();
+    }
+
     /**
      * Sends the loopback request that runs the next tick. A running run keeps
      * it going; otherwise due bulk jobs do, if a key, no auth pause and no
@@ -285,6 +313,37 @@ class Auto_Alt_Text_Library_Runner {
         return true;
     }
 
+    /**
+     * Restarts a stalled chain without waiting for a visitor's WP-Cron, from
+     * admin visits and the pages' polling requests. At most one check a
+     * minute; it chains only when no runner holds the lock, no tick has
+     * processed a job for two minutes, and a running run or due bulk work
+     * waits. maybe_chain() keeps its own checks.
+     *
+     * @return bool Whether it sent the loopback request.
+     */
+    public static function maybe_restart(): bool {
+        if ((defined('WP_CLI') && WP_CLI) || self::is_tick_request() || get_transient(self::RESTART_CHECK_TRANSIENT)) {
+            return false;
+        }
+        set_transient(self::RESTART_CHECK_TRANSIENT, 1, self::RESTART_CHECK_SECONDS);
+        if (time() - self::last_tick_at() <= self::RESTART_STALE_SECONDS || self::lock_held()) {
+            return false;
+        }
+        $run = Auto_Alt_Text_Library_Run::active();
+        $running = null !== $run && 'running' === Auto_Alt_Text_Library_Run::display_state($run)['state'];
+        if (!$running && 0 === Auto_Alt_Text_Queue::due_bulk_count()) {
+            return false;
+        }
+        return self::maybe_chain();
+    }
+
+    /** Whether this is the loopback tick request (admin_init fires on it before the handler). */
+    private static function is_tick_request(): bool {
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Only compared, never used.
+        return isset($_POST['action']) && self::TICK_ACTION === $_POST['action'];
+    }
+
     /** admin-post handler of the loopback tick. */
     public static function handle_tick_request(): void {
         // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Authenticated by the shared secret token.
@@ -293,7 +352,7 @@ class Auto_Alt_Text_Library_Runner {
             wp_die('', '', ['response' => 403]);
         }
 
-        ignore_user_abort(true);
+        self::detach_from_request();
         wp_raise_memory_limit('admin');
         self::extend_time_limit(self::budget());
 
@@ -302,7 +361,30 @@ class Auto_Alt_Text_Library_Runner {
         if (null !== $processed && ($processed > 0 || null !== Auto_Alt_Text_Library_Run::active())) {
             self::maybe_chain();
         }
+        // The response has ended: this output goes nowhere, and wp_die() skips its headers.
         wp_die('', '', ['response' => 204]);
+    }
+
+    /**
+     * Ends the HTTP response before the round, like wp-cron.php: the
+     * non-blocking sender has gone, and a host such as LiteSpeed may stop a
+     * request that stays open. The round then runs on in the background.
+     */
+    private static function detach_from_request(): void {
+        ignore_user_abort(true);
+        if (!headers_sent()) {
+            status_header(204);
+            nocache_headers();
+            header('Content-Length: 0');
+            header('Connection: close');
+        }
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        } elseif (function_exists('litespeed_finish_request')) {
+            litespeed_finish_request();
+        }
+        /** Fires once the loopback tick's response has ended, before the round. */
+        do_action('aat_library_tick_detached');
     }
 
     /**

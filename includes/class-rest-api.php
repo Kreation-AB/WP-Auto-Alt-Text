@@ -75,7 +75,10 @@ class Auto_Alt_Text_REST_API {
             ],
             [
                 'methods' => 'GET',
-                'callback' => static fn() => new WP_REST_Response(['bulk' => Auto_Alt_Text_Bulk::progress(get_current_user_id())], 200),
+                'callback' => static function () {
+                    Auto_Alt_Text_Library_Runner::maybe_restart();
+                    return new WP_REST_Response(['bulk' => Auto_Alt_Text_Bulk::progress(get_current_user_id())], 200);
+                },
                 'permission_callback' => $permission,
             ],
         ]);
@@ -146,6 +149,7 @@ class Auto_Alt_Text_REST_API {
     }
 
     public function library_get($request) {
+        Auto_Alt_Text_Library_Runner::maybe_restart();
         return new WP_REST_Response($this->library_payload(absint($request->get_param('failures_offset'))), 200);
     }
 

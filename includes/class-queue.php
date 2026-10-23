@@ -324,7 +324,7 @@ class Auto_Alt_Text_Queue {
         return true;
     }
 
-    private const STUCK_MINUTES   = 15;
+    private const STUCK_MINUTES   = 5;
     private const PRUNE_DONE_DAYS = 7;
     private const PRUNE_FAIL_DAYS = 30;
 
@@ -797,9 +797,14 @@ class Auto_Alt_Text_Queue {
 
     /**
      * Recovers processing rows older than STUCK_MINUTES (the runner died
-     * mid-job, e.g. a fatal or memory exhaustion). That counts as a used
-     * attempt with the normal backoff, so a job that kills the runner every
-     * time ends up failed instead of being retried first on every tick.
+     * mid-job, e.g. a fatal, memory exhaustion or a host stopping the
+     * request). That counts as a used attempt with the normal backoff, so a
+     * job that kills the runner every time ends up failed instead of being
+     * retried first on every tick. Five minutes is well above how long a live
+     * runner keeps a row processing: a budgeted round claims one job per
+     * batch (one OpenAI request of at most 30 s, plus image preparation and
+     * at most 5 s of rate-limit wait), and the plain run() a batch of five,
+     * under about 3 minutes.
      */
     private function recover_stuck_jobs() {
         global $wpdb;

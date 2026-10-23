@@ -12,6 +12,8 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         delete_option(Auto_Alt_Text_Quota_Monitor::OPTION);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);
         delete_option('aat_library_runner_lock');
+        delete_option(Auto_Alt_Text_Library_Runner::LAST_TICK_OPTION);
+        delete_transient('aat_runner_restart_check');
         (new Auto_Alt_Text_OpenAI())->save_api_key('sk-test-not-real');
         update_option('auto_alt_text_auto_generate', 1);
         $this->calls = [];
@@ -28,7 +30,7 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
         delete_option('aat_library_runner_lock');
         delete_option('aat_library_counts');
         delete_option('aat_library_start_lock');
-        unset($_POST['token']);
+        unset($_POST['token'], $_POST['action'], $_REQUEST['action']);
         wp_unschedule_hook(Auto_Alt_Text_Library_Scanner::RECOUNT_HOOK);
         parent::tearDown();
     }
@@ -365,5 +367,101 @@ class Auto_Alt_Text_Library_Runner_Test extends WP_UnitTestCase {
 
         Auto_Alt_Text_Library_Run::pause($id);
         $this->assertFalse(Auto_Alt_Text_Library_Runner::health(Auto_Alt_Text_Library_Run::get($id))['stalled']);
+    }
+
+    public function test_time_limit_for_never_lowers_the_server_limit() {
+        $this->assertNull(Auto_Alt_Text_Library_Runner::time_limit_for(90, 25.0));
+        $this->assertSame(75, Auto_Alt_Text_Library_Runner::time_limit_for(30, 25.0));
+        $this->assertNull(Auto_Alt_Text_Library_Runner::time_limit_for(0, 25.0), 'No limit stays no limit');
+        $this->assertNull(Auto_Alt_Text_Library_Runner::time_limit_for(75, 25.0));
+    }
+
+    /** Loopback tick requests sent since the last reset. */
+    private function loopbacks(): int {
+        return count(array_filter($this->requests, static fn($request) => false !== strpos($request['url'], 'admin-post.php')
+            && Auto_Alt_Text_Library_Runner::TICK_ACTION === ($request['args']['body']['action'] ?? null)));
+    }
+
+    private function last_tick(int $seconds_ago): void {
+        update_option(Auto_Alt_Text_Library_Runner::LAST_TICK_OPTION, time() - $seconds_ago, false);
+    }
+
+    /** A restart check outside the throttle window. */
+    private function restart(): bool {
+        delete_transient('aat_runner_restart_check');
+        return Auto_Alt_Text_Library_Runner::maybe_restart();
+    }
+
+    public function test_maybe_restart_chains_a_running_run_with_a_stale_tick_once_a_minute() {
+        $this->start_run();
+        $this->last_tick(121);
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::maybe_restart());
+        $this->assertSame(1, $this->loopbacks());
+
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::maybe_restart(), 'Throttled within 60 s');
+        $this->assertSame(1, $this->loopbacks());
+        $this->assertNotFalse(get_transient('aat_runner_restart_check'));
+
+        // A tick that never processed a job counts as stale.
+        delete_option(Auto_Alt_Text_Library_Runner::LAST_TICK_OPTION);
+        $this->assertTrue($this->restart());
+        $this->assertSame(2, $this->loopbacks());
+    }
+
+    public function test_maybe_restart_leaves_a_live_or_idle_runner_alone() {
+        $this->assertFalse($this->restart(), 'Nothing due');
+        (new Auto_Alt_Text_Queue())->enqueue(self::factory()->attachment->create(['post_mime_type' => 'image/jpeg']), 'upload');
+        $this->last_tick(121);
+        $this->assertFalse($this->restart(), 'Upload jobs are cron work');
+
+        $run = $this->start_run();
+        $this->last_tick(60);
+        $this->assertFalse($this->restart(), 'A recent tick');
+
+        $this->last_tick(121);
+        $owner = Auto_Alt_Text_Library_Runner::take_lock();
+        $this->assertNotNull($owner);
+        $this->assertFalse($this->restart(), 'The lock is held');
+        Auto_Alt_Text_Library_Runner::release_lock($owner);
+
+        Auto_Alt_Text_Library_Run::pause($run['id']);
+        $this->assertFalse($this->restart(), 'A paused run');
+        $this->assertSame(0, $this->loopbacks());
+    }
+
+    public function test_maybe_restart_never_runs_on_the_loopback_tick_request() {
+        $this->start_run();
+        $this->last_tick(121);
+        $_POST['action'] = Auto_Alt_Text_Library_Runner::TICK_ACTION;
+        $_REQUEST['action'] = Auto_Alt_Text_Library_Runner::TICK_ACTION;
+        $this->assertFalse($this->restart());
+        $this->assertSame(0, $this->loopbacks());
+    }
+
+    public function test_maybe_restart_runs_from_admin_init_and_the_polled_rest_gets() {
+        $this->start_run();
+        $this->last_tick(121);
+        $restart = ['Auto_Alt_Text_Library_Runner', 'on_admin_init'];
+        $this->assertNotFalse(has_action('admin_init', $restart));
+        // Fire only the runner's callback: core's admin_init callbacks send headers.
+        global $wp_filter;
+        foreach ($wp_filter['admin_init']->callbacks as $priority => $callbacks) {
+            foreach ($callbacks as $callback) {
+                if ($restart !== $callback['function']) {
+                    remove_action('admin_init', $callback['function'], $priority);
+                }
+            }
+        }
+        do_action('admin_init');
+        $this->assertSame(1, $this->loopbacks(), 'admin_init');
+
+        wp_set_current_user(self::factory()->user->create(['role' => 'administrator']));
+        do_action('rest_api_init');
+        foreach (['/library', '/bulk'] as $i => $path) {
+            delete_transient('aat_runner_restart_check');
+            $response = rest_do_request(new WP_REST_Request('GET', '/wp-auto-alt-text/v1' . $path));
+            $this->assertSame(200, $response->get_status());
+            $this->assertSame(2 + $i, $this->loopbacks(), 'GET ' . $path);
+        }
     }
 }

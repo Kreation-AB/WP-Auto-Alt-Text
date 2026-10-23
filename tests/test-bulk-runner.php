@@ -12,6 +12,7 @@ class Auto_Alt_Text_Bulk_Runner_Test extends WP_UnitTestCase {
         delete_option(Auto_Alt_Text_Library_Runner::LAST_TICK_OPTION);
         delete_transient(Auto_Alt_Text_Queue::AUTH_PAUSE_TRANSIENT);
         delete_option('aat_library_runner_lock');
+        delete_transient('aat_runner_restart_check');
         (new Auto_Alt_Text_OpenAI())->save_api_key('sk-test-not-real');
         update_option('auto_alt_text_auto_generate', 1);
         $this->loopbacks = 0;
@@ -192,6 +193,114 @@ class Auto_Alt_Text_Bulk_Runner_Test extends WP_UnitTestCase {
         $this->bulk_job();
         $this->loopbacks = 0;
         $this->handle_tick();
+        $this->assertSame(1, $this->loopbacks);
+    }
+
+    private function done_count(): int {
+        global $wpdb;
+        return (int) $wpdb->get_var($wpdb->prepare(
+            'SELECT COUNT(*) FROM ' . Auto_Alt_Text_Queue::get_table_name() . ' WHERE status = %s',
+            'done'
+        ));
+    }
+
+    public function test_tick_request_detaches_before_any_work() {
+        $this->bulk_job();
+        $events = [];
+        add_action('aat_library_tick_detached', static function () use (&$events) {
+            $events[] = Auto_Alt_Text_Library_Runner::lock_held() ? 'detached under the lock' : 'detached';
+        });
+        add_filter('pre_http_request', static function ($pre, $args, $url) use (&$events) {
+            if (false !== strpos($url, 'openai.com')) {
+                $events[] = 'openai';
+            }
+            return $pre;
+        }, 1, 3);
+        $this->handle_tick();
+        $this->assertSame('detached', $events[0] ?? null, 'The response ends before the lock is taken');
+        $this->assertContains('openai', $events, 'The round still runs after detaching');
+        $this->assertCount(1, array_keys($events, 'detached', true));
+    }
+
+    public function test_bad_token_is_rejected_before_detaching() {
+        $id = $this->bulk_job();
+        $detached = 0;
+        add_action('aat_library_tick_detached', static function () use (&$detached) {
+            $detached++;
+        });
+        $_POST['token'] = 'nope';
+        try {
+            Auto_Alt_Text_Library_Runner::handle_tick_request();
+            $this->fail('Expected wp_die');
+        } catch (WPDieException $e) {
+            $this->assertSame(403, $e->getCode());
+        }
+        $this->assertSame(0, $detached);
+        $this->assertSame('pending', $this->row_status($id));
+    }
+
+    /** @return array<string, array{0:string}> */
+    public function budgeted_rounds(): array {
+        return [
+            'tab tick'            => ['tab'],
+            'loopback tick'       => ['loopback'],
+            'cron with bulk work' => ['cron'],
+            'cron with a run'     => ['cron_run'],
+        ];
+    }
+
+    /** @dataProvider budgeted_rounds */
+    public function test_budgeted_rounds_check_the_budget_after_every_job(string $round) {
+        add_filter('aat_queue_time_budget', fn() => 0.001);
+        if ('cron_run' === $round) {
+            // The run alone puts cron on the budgeted path: the jobs are plain uploads.
+            global $wpdb;
+            update_option('aat_library_counts', [
+                'missing' => 1, 'ai' => 0, 'human' => 0, 'unsupported' => 0,
+                'max_id' => (int) $wpdb->get_var("SELECT MAX(ID) FROM {$wpdb->posts}"),
+                'updated_at' => time(), 'complete' => true,
+            ], false);
+            $this->assertIsArray(Auto_Alt_Text_Library_Run::start('missing', 1));
+            for ($i = 0; $i < 3; $i++) {
+                (new Auto_Alt_Text_Queue())->enqueue($this->image(), 'upload');
+            }
+            $this->assertSame(0, Auto_Alt_Text_Queue::due_bulk_count());
+        } else {
+            for ($i = 0; $i < 3; $i++) {
+                $this->bulk_job();
+            }
+        }
+
+        switch ($round) {
+            case 'tab':
+                $this->assertSame(1, Auto_Alt_Text_Library_Runner::tick_for_request(0.001));
+                break;
+            case 'loopback':
+                $this->handle_tick();
+                break;
+            default:
+                Auto_Alt_Text_Library_Runner::cron_tick();
+        }
+        $this->assertSame(1, $this->done_count(), 'The budget is checked after every job');
+        $this->assertFalse(Auto_Alt_Text_Library_Runner::lock_held());
+    }
+
+    public function test_plain_cron_run_keeps_batches_of_five() {
+        add_filter('aat_queue_time_budget', fn() => 0.001);
+        for ($i = 0; $i < 3; $i++) {
+            (new Auto_Alt_Text_Queue())->enqueue($this->image(), 'upload');
+        }
+        $this->assertNull(Auto_Alt_Text_Library_Run::active());
+        $this->assertSame(0, Auto_Alt_Text_Queue::due_bulk_count());
+        Auto_Alt_Text_Library_Runner::cron_tick();
+        $this->assertSame(3, $this->done_count(), 'An unbudgeted run takes one batch of five');
+    }
+
+    public function test_maybe_restart_chains_due_bulk_work_without_a_run() {
+        $this->bulk_job();
+        update_option(Auto_Alt_Text_Library_Runner::LAST_TICK_OPTION, time() - 121, false);
+        $this->loopbacks = 0;
+        $this->assertTrue(Auto_Alt_Text_Library_Runner::maybe_restart());
         $this->assertSame(1, $this->loopbacks);
     }
 }

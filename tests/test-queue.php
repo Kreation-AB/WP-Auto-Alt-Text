@@ -182,6 +182,31 @@ class Auto_Alt_Text_Queue_Test extends WP_UnitTestCase {
         $this->assertSame([], $calls);
     }
 
+    public function test_stuck_jobs_are_recovered_after_five_minutes() {
+        $stuck = self::factory()->attachment->create();
+        $fresh = self::factory()->attachment->create();
+        $queue = $this->queue_with_result(['status' => 'success', 'error' => null], $calls);
+        $queue->enqueue($stuck, 'upload');
+        $queue->enqueue($fresh, 'upload');
+        global $wpdb;
+        foreach ([$stuck => 6, $fresh => 4] as $id => $minutes) {
+            $wpdb->update(Auto_Alt_Text_Queue::get_table_name(), [
+                'status'     => Auto_Alt_Text_Queue::STATUS_PROCESSING,
+                'attempts'   => 1,
+                'updated_at' => gmdate('Y-m-d H:i:s', time() - $minutes * MINUTE_IN_SECONDS),
+            ], ['attachment_id' => $id]);
+        }
+        $queue->run();
+        $job = $this->get_job($stuck);
+        $this->assertSame(Auto_Alt_Text_Queue::STATUS_PENDING, $job->status);
+        $this->assertSame('2', $job->attempts);
+        $this->assertSame('Processing timed out (recovered stuck job)', $job->last_error);
+        $job = $this->get_job($fresh);
+        $this->assertSame(Auto_Alt_Text_Queue::STATUS_PROCESSING, $job->status, 'A job processing for 4 minutes may still be running');
+        $this->assertSame('1', $job->attempts);
+        $this->assertSame([], $calls);
+    }
+
     public function test_deleted_attachment_marks_job_done() {
         $id = self::factory()->attachment->create();
         $queue = $this->queue_with_result(['status' => 'success', 'error' => null], $calls);
