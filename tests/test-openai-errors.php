@@ -114,6 +114,37 @@ class Auto_Alt_Text_OpenAI_Errors_Test extends WP_UnitTestCase {
         $this->assertFalse(Auto_Alt_Text_Quota_Monitor::is_active());
     }
 
+    /** A 400 invalid_request_error fixture with its message replaced (synthetic, on the rate-limited base). */
+    private static function bad_request($message) {
+        $fixture = Auto_Alt_Text_Test_OpenAI_Fixtures::load('rate-limited');
+        $fixture['status'] = 400;
+        $fixture['headers'] = ['content-type' => 'application/json'];
+        $fixture['body'] = ['error' => ['message' => $message, 'type' => 'invalid_request_error']];
+        return $fixture;
+    }
+
+    public function test_openai_download_failures_say_the_image_could_not_be_fetched() {
+        $expected = 'OpenAI kunde inte hämta bilden från webbplatsen. Kontrollera att bildfilen finns och går att nå utifrån.';
+        $messages = [
+            'Error while downloading file. Upstream status code: 404.',
+            'Unable to download content from the provided URL before the timeout. Check that the URL is publicly accessible and responds promptly, or upload the file and provide a file_id instead.',
+        ];
+        foreach ($messages as $message) {
+            $this->fixtures->queue_response(self::bad_request($message));
+            [$result] = $this->generate();
+            $this->assertNull($result);
+            $this->assertSame($expected, $this->openai->get_last_error(), $message);
+            $this->assertSame('permanent', $this->openai->get_last_error_class(), $message);
+        }
+    }
+
+    public function test_other_400_errors_keep_the_format_message() {
+        $this->fixtures->queue_response(self::bad_request('Unsupported parameter: max_output_tokens'));
+        [$result] = $this->generate();
+        $this->assertNull($result);
+        $this->assertSame('Model request format error. Please verify plugin compatibility with the current OpenAI model.', $this->openai->get_last_error());
+    }
+
     public function test_model_the_key_cannot_use_is_named_in_a_permanent_error() {
         $this->fixtures->queue_response(self::model_not_found('The model `gpt-6-luna` does not exist or you do not have access to it.'));
         $this->openai->set_run_overrides(['model' => 'gpt-6-luna']);

@@ -121,6 +121,10 @@ class Auto_Alt_Text_Image_Source {
                 return new WP_Error('image_missing', __('The image file could not be found.', 'WP-Auto-Alt-Text'));
             }
             if (self::can_use_remote_image_source($url, (string) get_post_mime_type($attachment_id))) {
+                $missing = self::check_remote_image($url, $attachment_id);
+                if (is_wp_error($missing)) {
+                    return $missing;
+                }
                 $source->image_url = $url;
                 return $source;
             }
@@ -137,6 +141,30 @@ class Auto_Alt_Text_Image_Source {
             return $prepared;
         }
         return $source;
+    }
+
+    /**
+     * Asks the server whether the public URL answers, so a deleted file is caught before OpenAI
+     * spends a download attempt on it. Only a clear 404/410 stops the job; anything else leaves
+     * the URL to OpenAI, including 401/403, which signed URLs and firewalls give a HEAD that a
+     * GET would pass.
+     *
+     * @return null|WP_Error
+     */
+    private static function check_remote_image($url, $attachment_id) {
+        if (!apply_filters('aat_check_remote_image', true, $url, $attachment_id)) {
+            return null;
+        }
+        $response = wp_remote_head($url, ['timeout' => 10, 'redirection' => 3]);
+        if (is_wp_error($response)) {
+            return null;
+        }
+        $code = (int) wp_remote_retrieve_response_code($response);
+        if (404 === $code || 410 === $code) {
+            /* translators: %s: HTTP status code */
+            return new WP_Error('image_missing_remote', sprintf(__('Bildfilen saknas på servern (HTTP %s). Ladda upp bilden igen.', 'WP-Auto-Alt-Text'), $code));
+        }
+        return null;
     }
 
     /** @return array{type:string,image_url:string,detail:string} */

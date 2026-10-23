@@ -313,6 +313,9 @@ class Auto_Alt_Text_Bulk_Test extends WP_UnitTestCase {
             'The model stopped before finishing the alt text.'                     => 'OpenAI gav inget användbart svar.',
             'The model declined to describe this image.'                           => 'OpenAI ville inte beskriva bilden.',
             'The model gpt-x is not available to this OpenAI API key. Choose another model under Auto Alt Text → Settings.' => 'Modellen är inte tillgänglig för API-nyckeln.',
+            'OpenAI kunde inte hämta bilden från webbplatsen. Kontrollera att bildfilen finns och går att nå utifrån.' => 'OpenAI kunde inte hämta bilden.',
+            'Bildfilen saknas på servern (HTTP 404). Ladda upp bilden igen.'       => 'Bildfilen saknas på servern.',
+            'Bildfilen saknas på servern (HTTP 410). Ladda upp bilden igen.'       => 'Bildfilen saknas på servern.',
         ];
         foreach ($cases as $error => $expected) {
             $this->assertSame($expected, Auto_Alt_Text_Bulk::failure_message($error), $error);

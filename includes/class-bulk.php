@@ -47,6 +47,12 @@ class Auto_Alt_Text_Bulk {
         'OpenAI ville inte beskriva bilden.' => [
             'The model declined to describe this image.',
         ],
+        'OpenAI kunde inte hämta bilden.' => [
+            'OpenAI kunde inte hämta bilden från webbplatsen. Kontrollera att bildfilen finns och går att nå utifrån.',
+        ],
+        'Bildfilen saknas på servern.' => [
+            'Bildfilen saknas på servern (HTTP %s). Ladda upp bilden igen.',
+        ],
         'Modellen är inte tillgänglig för API-nyckeln.' => [
             'The model %s is not available to this OpenAI API key. Choose another model under Auto Alt Text → Settings.',
         ],

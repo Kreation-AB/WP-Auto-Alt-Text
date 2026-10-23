@@ -329,11 +329,80 @@ class Auto_Alt_Text_Image_Source_Test extends WP_UnitTestCase {
     public function test_offloaded_image_on_a_public_host_is_sent_by_url() {
         $id = $this->upload('canola.jpg');
         $this->offload($id, 'https://cdn.example.com/canola.jpg');
+        $this->stub_head(200);
 
         $source = Auto_Alt_Text_Image_Source::for_attachment($id, 'low');
 
         $this->assertSame('https://cdn.example.com/canola.jpg', $source->input_image()['image_url']);
         $this->assertSame(['url' => 'https://cdn.example.com/canola.jpg'], Auto_Alt_Text_Image_Source::fingerprint($id));
+    }
+
+    /** Answers HEAD requests with the given status (or a WP_Error) and records the URLs. */
+    private function stub_head($response) {
+        $heads = [];
+        add_filter('pre_http_request', function ($pre, $args, $url) use (&$heads, $response) {
+            if ('HEAD' !== ($args['method'] ?? '')) {
+                return $pre;
+            }
+            $heads[] = $url;
+            if (is_wp_error($response)) {
+                return $response;
+            }
+            return ['headers' => [], 'body' => '', 'response' => ['code' => $response, 'message' => ''], 'cookies' => []];
+        }, 10, 3);
+        return function () use (&$heads) {
+            return $heads;
+        };
+    }
+
+    private function offload_public($status) {
+        $id = $this->upload('canola.jpg');
+        $this->offload($id, 'https://cdn.example.com/canola.jpg');
+        $heads = $this->stub_head($status);
+        return [$id, $heads];
+    }
+
+    public function test_missing_remote_file_is_caught_before_openai() {
+        foreach ([404, 410] as $code) {
+            [$id] = $this->offload_public($code);
+            $result = Auto_Alt_Text_Image_Source::for_attachment($id, 'auto');
+            $this->assertWPError($result);
+            $this->assertSame('image_missing_remote', $result->get_error_code());
+            $this->assertSame(sprintf('Bildfilen saknas på servern (HTTP %s). Ladda upp bilden igen.', $code), $result->get_error_message());
+        }
+    }
+
+    public function test_missing_remote_file_makes_no_openai_request() {
+        $fixtures = new Auto_Alt_Text_Test_OpenAI_Fixtures();
+        $fixtures->install();
+        $openai = new Auto_Alt_Text_OpenAI();
+        $openai->save_api_key('sk-test-not-real');
+        [$id] = $this->offload_public(404);
+        $openai->generate_alt_text('https://cdn.example.com/canola.jpg', $id, 'manual');
+        $fixtures->uninstall();
+        $this->assertSame([], $fixtures->requests());
+        $this->assertSame('permanent', $openai->get_last_error_class());
+        $this->assertStringContainsString('Bildfilen saknas på servern (HTTP 404)', $openai->get_last_error());
+    }
+
+    public function test_other_head_outcomes_still_send_the_url() {
+        // 401/403 included: signed URLs and firewalls refuse a HEAD that a GET would pass.
+        $cases = [200, 301, 401, 403, 405, 500, new WP_Error('http_request_failed', 'timeout')];
+        foreach ($cases as $status) {
+            [$id] = $this->offload_public($status);
+            $source = Auto_Alt_Text_Image_Source::for_attachment($id, 'auto');
+            $this->assertNotWPError($source);
+            $this->assertSame('https://cdn.example.com/canola.jpg', $source->input_image()['image_url']);
+        }
+    }
+
+    public function test_the_head_check_can_be_filtered_off() {
+        [$id, $heads] = $this->offload_public(404);
+        add_filter('aat_check_remote_image', '__return_false');
+        $source = Auto_Alt_Text_Image_Source::for_attachment($id, 'auto');
+        $this->assertNotWPError($source);
+        $this->assertSame('https://cdn.example.com/canola.jpg', $source->input_image()['image_url']);
+        $this->assertSame([], $heads());
     }
 
     public function test_offloaded_image_on_a_private_host_is_downloaded() {

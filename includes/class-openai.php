@@ -888,6 +888,10 @@ class Auto_Alt_Text_OpenAI  {
             return __('OpenAI rate limit reached. Please wait and try again.', 'WP-Auto-Alt-Text');
         }
 
+        if (strpos($error_message, 'error while downloading') !== false || strpos($error_message, 'unable to download content') !== false || strpos($error_message, 'upstream status code') !== false) {
+            return __('OpenAI kunde inte hämta bilden från webbplatsen. Kontrollera att bildfilen finns och går att nå utifrån.', 'WP-Auto-Alt-Text');
+        }
+
         if ($http_code === 400 || strpos($error_message, 'max_output_tokens') !== false || strpos($error_message, 'unsupported parameter') !== false || strpos($error_message, 'input_image') !== false || strpos($error_message, 'responses') !== false) {
             return __('Model request format error. Please verify plugin compatibility with the current OpenAI model.', 'WP-Auto-Alt-Text');
         }
